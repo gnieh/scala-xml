@@ -508,44 +508,51 @@ class XmlPullParser private (
   private def completeStartTag(name: QName): XmlEvent = {
     val attributes = readAttributes()
     space()
-    val isEmpty = peekChar() match {
-      case Some('/') =>
-        nextChar()
-        true
-      case _ =>
-        false
-    }
-    accept('>', "XML [44]: missing closing '>'")
-    val builder = new VectorBuilder[Attribute]
-    @tailrec
-    def adjustNS(attributes: Attributes): Attributes =
-      attributes match {
-        case Seq() => builder.result()
-        case Seq(att, rest @ _*) =>
-          att match {
-            case Attribute(QName(None, "xmlns", _), "") =>
-              // undeclare default namespace
-              namespaces -= ""
-            case Attribute(QName(None, "xmlns", _), v) =>
-              // update default namespace
-              namespaces += ("" -> new URI(v))
-            case Attribute(QName(Some("xmlns"), p, _), "") =>
-              // undeclare namespace
-              namespaces -= p
-            case Attribute(QName(Some("xmlns"), p, _), v) =>
-              // update namespace
-              namespaces += (p -> new URI(v))
-            case Attribute(name, value) =>
-              builder += Attribute(resolveQName(name, false), value)
-          }
-          adjustNS(rest)
+    if (partial && peekChar().isEmpty) {
+      // end of current inputs but partial parse is enabled
+      // emit the appropriate event to feed with custom attributes
+      // before continuing.
+      ExpectAttributes(name, attributes)
+    } else {
+      val isEmpty = peekChar() match {
+        case Some('/') =>
+          nextChar()
+          true
+        case _ =>
+          false
       }
+      accept('>', "XML [44]: missing closing '>'")
+      val builder = new VectorBuilder[Attribute]
+      @tailrec
+      def adjustNS(attributes: Attributes): Attributes =
+        attributes match {
+          case Seq() => builder.result()
+          case Seq(att, rest @ _*) =>
+            att match {
+              case Attribute(QName(None, "xmlns", _), "") =>
+                // undeclare default namespace
+                namespaces -= ""
+              case Attribute(QName(None, "xmlns", _), v) =>
+                // update default namespace
+                namespaces += ("" -> new URI(v))
+              case Attribute(QName(Some("xmlns"), p, _), "") =>
+                // undeclare namespace
+                namespaces -= p
+              case Attribute(QName(Some("xmlns"), p, _), v) =>
+                // update namespace
+                namespaces += (p -> new URI(v))
+              case Attribute(name, value) =>
+                builder += Attribute(resolveQName(name, false), value)
+            }
+            adjustNS(rest)
+        }
 
-    val proper = adjustNS(attributes)
+      val proper = adjustNS(attributes)
 
-    val resolved = resolveQName(name, true)
+      val resolved = resolveQName(name, true)
 
-    StartTag(resolved, proper, isEmpty)
+      StartTag(resolved, proper, isEmpty)
+    }
   }
 
   /** We read '<[CDATA[' so far */
@@ -743,6 +750,8 @@ class XmlPullParser private (
       readCharData()
     case EndDocument =>
       throw new NoSuchElementException
+    case ExpectAttributes(name, _) =>
+      completeStartTag(name)
   }
 
 }

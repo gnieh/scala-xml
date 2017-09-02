@@ -18,7 +18,7 @@ package dom
 
 sealed trait XmlNode
 
-case class Elem(name: QName, attributes: Map[QName, String], children: Seq[XmlNode]) extends XmlNode 
+case class Elem(name: QName, attributes: Map[QName, String], children: Seq[XmlNode]) extends XmlNode
 
 case class Comment(content: String) extends XmlNode
 

@@ -16,18 +16,4 @@
 package scalax.xml
 package parser
 
-sealed trait XmlEvent
-
-case object StartDocument extends XmlEvent
-
-final case class StartTag(name: QName, attributes: Attributes, isEmpty: Boolean) extends XmlEvent
-
-final case class XmlString(s: String, isCDATA: Boolean) extends XmlEvent
-
-final case class XmlDoctype(name: String, docname: String, systemid: Option[String]) extends XmlEvent
-
-final case class EndTag(name: QName) extends XmlEvent
-
-case object EndDocument extends XmlEvent
-
-final case class ExpectAttributes(name: QName, attributes: Attributes) extends XmlEvent
+class ParserException(line: Int, column: Int, message: String) extends Exception(f"[$line:$column] $message")

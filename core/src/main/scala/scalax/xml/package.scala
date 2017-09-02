@@ -15,11 +15,24 @@
 */
 package scalax
 
+import scala.io.Source
+
 import java.net.URI
 
 package object xml {
 
+  import parser._
+  import dom._
+
   type Attributes = Seq[Attribute]
 
   type NameSpaces = Map[String, URI]
+
+  implicit class XmlInterpolators(val sc: StringContext) extends AnyVal {
+
+    def xml(args: Any*): XmlNode =
+      DOMParser.fromParts(sc.parts.map(Source.fromString(_)), args).parse()
+
+  }
+
 }

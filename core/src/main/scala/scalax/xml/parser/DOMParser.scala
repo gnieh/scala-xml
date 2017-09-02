@@ -22,13 +22,25 @@ import scala.io.Source
 
 import scala.collection.immutable.VectorBuilder
 
-class DOMParser(input: Source) {
+import scala.reflect.classTag
 
-  private val parser = new XmlPullParser(input, Map.empty, Map.empty, false)
+class DOMParser private (partial: Boolean, private var parts: Seq[Source], private var args: Seq[Any]) {
+
+  import DOMParser._
+
+  private val parser = parts match {
+    case Seq(fst, rest @ _*) =>
+      parts = rest
+      new XmlPullParser(fst, Map.empty, Map.empty, partial)
+    case Seq() =>
+      throw new Exception("at least one part must be provided")
+  }
 
   private var stack: List[StartTag] = Nil
 
   private var elements: List[VectorBuilder[XmlNode]] = List(new VectorBuilder)
+
+  private val partialAttributes = new VectorBuilder[Attribute]
 
   def parse(): XmlNode = {
     for (evt <- parser) evt match {
@@ -38,7 +50,8 @@ class DOMParser(input: Source) {
       case EndTag(ename) =>
         (stack, elements) match {
           case (StartTag(sname, attributes, _) :: restStack, content :: (restElements @ builder :: _)) if ename == sname =>
-            val attrs = attributes.foldLeft(Map.empty[QName, String]) {
+            partialAttributes ++= attributes
+            val attrs = partialAttributes.result().foldLeft(Map.empty[QName, String]) {
               case (acc, attr @ Attribute(name, value)) =>
                 if (acc.contains(name))
                   throw new Exception(f"[uniqattspec]: duplicate attribite with name $name")
@@ -47,6 +60,7 @@ class DOMParser(input: Source) {
             builder += Elem(sname, attrs, content.result())
             stack = restStack
             elements = restElements
+            partialAttributes.clear()
 
           case (StartTag(sname, attributes, _) :: _, _) =>
             throw new Exception(f"[GIMatch]: expected closing tag '$sname' but got closing tag '$ename'")
@@ -63,6 +77,23 @@ class DOMParser(input: Source) {
           case _ =>
             throw new IllegalStateException
         }
+      case ExpectAttributes(_, attrs) if partial =>
+        partialAttributes ++= attrs
+        args match {
+          case Seq(AttributesTag(arg), rest @ _*) =>
+            args = rest
+            partialAttributes ++= arg
+            parts match {
+              case Seq(part, rest @ _*) =>
+                parts = rest
+                parser.feed(part)
+              case _ =>
+              // do nothing
+            }
+          case _ =>
+            throw new Exception("invalid arguments")
+        }
+
       case _ =>
       // do nothing for other events
     }
@@ -84,6 +115,11 @@ class DOMParser(input: Source) {
 object DOMParser {
 
   def fromString(str: String): DOMParser =
-    new DOMParser(Source.fromString(str))
+    new DOMParser(false, Seq(Source.fromString(str)), Seq.empty)
+
+  def fromParts(parts: Seq[Source], args: Seq[Any]): DOMParser =
+    new DOMParser(true, parts, args)
+
+  private[parser] val AttributesTag = classTag[Attributes]
 
 }
