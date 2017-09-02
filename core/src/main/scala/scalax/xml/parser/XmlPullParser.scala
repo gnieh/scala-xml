@@ -18,19 +18,31 @@ package parser
 
 import scala.io.Source
 
+import scala.util.Try
+
 import scala.annotation.{
   tailrec,
   switch
 }
 
-import scala.collection.immutable.VectorBuilder
+import scala.collection.immutable.{
+  VectorBuilder,
+  Queue
+}
 
 import java.net.URI
 
 /** An XML pull parser that accepts some form of partial inputs.
  *  The parser performs qualified name resolution base on current `namespaces`.
  */
-class XmlPullParser(private var input: Source, predefEntities: Map[String, String], private var namespaces: NameSpaces) extends Iterator[XmlEvent] {
+class XmlPullParser private (
+    private var inputs: Queue[Source],
+    predefEntities: Map[String, String],
+    private var namespaces: NameSpaces,
+    partial: Boolean) extends Iterator[XmlEvent] {
+
+  def this(input: Source, predefEntities: Map[String, String], namespaces: NameSpaces, partial: Boolean) =
+    this(Queue(input), predefEntities, namespaces, partial)
 
   import XmlPullParser._
 
@@ -63,14 +75,57 @@ class XmlPullParser(private var input: Source, predefEntities: Map[String, Strin
       previousEvent
   }
 
+  /** Feeds this parser with more content from the given source. */
+  def feed(src: Source): Unit =
+    inputs = inputs.enqueue(src)
+
   // ==== low-level internals
+
+  private var sawCR = false
+  private var line = 1
+  private var column = 0
+
+  private def fail(msg: String): Nothing = {
+    Try(inputs.foreach(_.close()))
+    throw new ParserException(line, column, msg)
+  }
 
   private var buffer = Option.empty[Char]
 
+  @tailrec
+  private def readInput(): Unit =
+    inputs.dequeueOption match {
+      case Some((input, rest)) =>
+        if (input.hasNext) {
+          val c = input.next()
+          c match {
+            case '\n' =>
+              line += 1
+              column = 0
+              sawCR = false
+            case '\r' =>
+              sawCR = true
+            case _ if sawCR =>
+              line += 1
+              column = 0
+              sawCR = false
+            case _ =>
+              sawCR = false
+              column += 1
+          }
+          buffer = Some(c)
+        } else {
+          input.close()
+          inputs = rest
+          readInput()
+        }
+      case None =>
+        buffer = None
+    }
+
   private def peekChar(): Option[Char] =
     buffer.orElse {
-      if (input.hasNext)
-        buffer = Some(input.next())
+      readInput()
       buffer
     }
 
@@ -82,20 +137,20 @@ class XmlPullParser(private var input: Source, predefEntities: Map[String, Strin
 
   /** Consumes the next character in source and returns it. */
   private def nextChar(): Char =
-    nextCharOpt().getOrElse(throw new Exception("Unexpected end of input"))
+    nextCharOpt().getOrElse(fail("Unexpected end of input"))
 
   private def accept(c: Char, msg: String): Unit = peekChar() match {
     case Some(n) if n == c =>
       nextChar()
     case _ =>
-      throw new Exception(msg)
+      fail(msg)
   }
 
   private def assert(p: Char => Boolean, msg: String): Char = peekChar() match {
     case Some(c) if p(c) =>
       nextChar()
     case _ =>
-      throw new Exception(msg)
+      fail(msg)
   }
 
   private def untilChar(p: Char => Boolean, sb: StringBuilder): StringBuilder = {
@@ -139,7 +194,7 @@ class XmlPullParser(private var input: Source, predefEntities: Map[String, Strin
       untilChar(c => !isNCNameChar(c), sb.append(c))
       sb.toString
     } else {
-      throw new Exception(f"XML [5]: character '$c' cannot start a NCName")
+      fail(f"XML [5]: character '$c' cannot start a NCName")
     }
   }
 
@@ -168,7 +223,7 @@ class XmlPullParser(private var input: Source, predefEntities: Map[String, Strin
         namespaces.get(ns) match {
           case Some(uri)                          => QName(Some(ns), n, Some(uri))
           case None if ns.equalsIgnoreCase("xml") => QName(Some(ns), n, Some(xmlNSURI))
-          case None                               => throw new Exception(f"[nsc-NSDeclared]: undeclared namespace $ns")
+          case None                               => fail(f"[nsc-NSDeclared]: undeclared namespace $ns")
         }
     }
 
@@ -237,7 +292,7 @@ class XmlPullParser(private var input: Source, predefEntities: Map[String, Strin
   private def readCDATA(): CDataToken.type = {
     val n = read("CDATA[")
     if (n < 6)
-      throw new Exception("XML [19]: 'CDATA[' expected")
+      fail("XML [19]: 'CDATA[' expected")
     CDataToken
   }
 
@@ -268,7 +323,7 @@ class XmlPullParser(private var input: Source, predefEntities: Map[String, Strin
         case Some(_) =>
           loop(sb.append('?'))
         case None =>
-          throw new Exception("XML [16]: Unexpected end of input")
+          fail("XML [16]: Unexpected end of input")
       }
     }
     loop(new StringBuilder)
@@ -297,7 +352,7 @@ class XmlPullParser(private var input: Source, predefEntities: Map[String, Strin
         assert(_.isWhitespace, "XML [12]: space required after PubidLiteral")
         readQuoted()
       case _ =>
-        throw new Exception("XML [75]: SYSTEM or PUBLIC expected")
+        fail("XML [75]: SYSTEM or PUBLIC expected")
     }
   }
 
@@ -319,9 +374,9 @@ class XmlPullParser(private var input: Source, predefEntities: Map[String, Strin
         case t @ PIToken(_)    => Some(t)
         case t @ DeclToken(_)  => Some(t)
         case t @ StartToken(_) => Some(t)
-        case t                 => throw new Exception(f"XML [22]: unexpected token '$t'")
+        case t                 => fail(f"XML [22]: unexpected token '$t'")
       }
-      case Some(c) => throw new Exception(f"XML [22]: unexpected character '$c'")
+      case Some(c) => fail(f"XML [22]: unexpected character '$c'")
     }
   }
 
@@ -330,7 +385,7 @@ class XmlPullParser(private var input: Source, predefEntities: Map[String, Strin
     def postlude(n: Int) =
       (nextChar(): @switch) match {
         case ';' => n.toChar
-        case _   => throw new Exception("XML [66]: character reference must end with a semicolon")
+        case _   => fail("XML [66]: character reference must end with a semicolon")
       }
     peekChar() match {
       case Some('x') =>
@@ -365,12 +420,12 @@ class XmlPullParser(private var input: Source, predefEntities: Map[String, Strin
     def rest(acc: Int): Char =
       peekChar() match {
         case Digit(d) => rest(acc * base + d)
-        case _        => throw new Exception("XML [66]: bad character reference digit")
+        case _        => fail("XML [66]: bad character reference digit")
       }
 
     nextCharOpt() match {
       case Digit(d) => rest(d)
-      case _        => throw new Exception("XML [66]: bad first character reference digit")
+      case _        => fail("XML [66]: bad first character reference digit")
     }
   }
 
@@ -383,13 +438,13 @@ class XmlPullParser(private var input: Source, predefEntities: Map[String, Strin
         // TODO read content
         name
       case Some(NEBlackHole) =>
-        throw new Exception(f"[norecursion]: entity $name is recursive")
+        fail(f"[norecursion]: entity $name is recursive")
       case None =>
         predefEntities.get(name) match {
           case Some(s) =>
             s
           case None =>
-            throw new Exception(f"[wf-entdeclared]: Entitiy $name is not declared")
+            fail(f"[wf-entdeclared]: Entitiy $name is not declared")
         }
     }
 
@@ -419,7 +474,7 @@ class XmlPullParser(private var input: Source, predefEntities: Map[String, Strin
     untilChar(delimiters.contains(_), sb)
     nextCharOpt() match {
       case `delim` => sb.toString
-      case None    => throw new Exception("XML [10]: unexpected end of input")
+      case None    => fail("XML [10]: unexpected end of input")
       case Some('\r') =>
         peekChar() match {
           case Some('\n') =>
@@ -440,7 +495,7 @@ class XmlPullParser(private var input: Source, predefEntities: Map[String, Strin
             readAttributeValue(delim, sb.append(s))
         }
       case Some(c) =>
-        throw new Exception(f"XML [10]: Unexpected character '$c'")
+        fail(f"XML [10]: Unexpected character '$c'")
     }
   }
 
@@ -559,7 +614,7 @@ class XmlPullParser(private var input: Source, predefEntities: Map[String, Strin
           case CommentToken =>
             readCharData()
           case DeclToken(n) =>
-            throw new Exception(f"Unexpected declaration '$n'")
+            fail(f"Unexpected declaration '$n'")
           case CDataToken =>
             val body = readCDATABody(new StringBuilder)
             XmlString(body, true)
@@ -571,7 +626,7 @@ class XmlPullParser(private var input: Source, predefEntities: Map[String, Strin
             skipPI()
             readCharData()
           case t =>
-            throw new Exception(f"XML [43]: unexpected token $t")
+            fail(f"XML [43]: unexpected token $t")
         }
       case Some(_) => slowPath(new StringBuilder)
       case None    => EndDocument
@@ -620,7 +675,7 @@ class XmlPullParser(private var input: Source, predefEntities: Map[String, Strin
   private def scanPrologToken1(): XmlEvent = {
     scanMisc() match {
       case None =>
-        throw new Exception("XML [22]: unexpected end of input")
+        fail("XML [22]: unexpected end of input")
       case Some(PIToken(name)) =>
         skipPI()
         scanPrologToken1()
@@ -629,7 +684,7 @@ class XmlPullParser(private var input: Source, predefEntities: Map[String, Strin
       case Some(StartToken(name)) =>
         readElement(name)
       case Some(t) =>
-        throw new Exception(f"XML [22]: unexpected markup $t")
+        fail(f"XML [22]: unexpected markup $t")
     }
   }
 
@@ -653,24 +708,24 @@ class XmlPullParser(private var input: Source, predefEntities: Map[String, Strin
             skipInternalDTD()
             XmlDoctype(name, docname, systemid)
           case _ =>
-            throw new Exception("XML [28]: end of doctype or itnernal DTD expected")
+            fail("XML [28]: end of doctype or itnernal DTD expected")
         }
       case _ =>
-        throw new Exception("XML [22]: expected DOCTYPE declaration")
+        fail("XML [22]: expected DOCTYPE declaration")
     }
 
   @tailrec
   private def scanPrologToken2(): XmlEvent =
     scanMisc() match {
       case None =>
-        throw new Exception("XML [22]: unexpected end of input")
+        fail("XML [22]: unexpected end of input")
       case Some(PIToken(name)) =>
         skipPI()
         scanPrologToken2()
       case Some(StartToken(name)) =>
         readElement(name)
       case Some(t) =>
-        throw new Exception(f"XML [22]: unexpected markup $t")
+        fail(f"XML [22]: unexpected markup $t")
     }
 
   private def scan(): XmlEvent = previousEvent match {

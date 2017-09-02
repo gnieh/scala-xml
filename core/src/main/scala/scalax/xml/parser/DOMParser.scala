@@ -24,7 +24,7 @@ import scala.collection.immutable.VectorBuilder
 
 class DOMParser(input: Source) {
 
-  private val parser = new XmlPullParser(input, Map.empty, Map.empty)
+  private val parser = new XmlPullParser(input, Map.empty, Map.empty, false)
 
   private var stack: List[StartTag] = Nil
 
@@ -78,5 +78,12 @@ class DOMParser(input: Source) {
         throw new IllegalStateException
     }
   }
+
+}
+
+object DOMParser {
+
+  def fromString(str: String): DOMParser =
+    new DOMParser(Source.fromString(str))
 
 }
