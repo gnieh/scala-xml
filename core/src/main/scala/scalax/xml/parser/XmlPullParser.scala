@@ -39,7 +39,7 @@ class XmlPullParser private (
     private var inputs: Queue[Source],
     predefEntities: Map[String, String],
     private var namespaces: NameSpaces,
-    partial: Boolean) extends Iterator[XmlEvent] {
+    var partial: Boolean) extends Iterator[XmlEvent] {
 
   def this(input: Source, predefEntities: Map[String, String], namespaces: NameSpaces, partial: Boolean) =
     this(Queue(input), predefEntities, namespaces, partial)
@@ -635,8 +635,9 @@ class XmlPullParser private (
           case t =>
             fail(f"XML [43]: unexpected token $t")
         }
-      case Some(_) => slowPath(new StringBuilder)
-      case None    => EndDocument
+      case Some(_)         => slowPath(new StringBuilder)
+      case None if partial => ExpectNodes
+      case None            => EndDocument
     }
 
   @tailrec
@@ -674,7 +675,10 @@ class XmlPullParser private (
     completeStartTag(start)
 
   private def readContent(): XmlEvent =
-    readCharData()
+    if (partial && peekChar().isEmpty)
+      ExpectNodes
+    else
+      readCharData()
 
   // ==== high-level internals
 
@@ -752,6 +756,8 @@ class XmlPullParser private (
       throw new NoSuchElementException
     case ExpectAttributes(name, _) =>
       completeStartTag(name)
+    case ExpectNodes =>
+      readContent()
   }
 
 }

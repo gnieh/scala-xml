@@ -31,3 +31,5 @@ final case class EndTag(name: QName) extends XmlEvent
 case object EndDocument extends XmlEvent
 
 final case class ExpectAttributes(name: QName, attributes: Attributes) extends XmlEvent
+
+case object ExpectNodes extends XmlEvent

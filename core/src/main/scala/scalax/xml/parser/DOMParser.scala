@@ -84,13 +84,43 @@ class DOMParser private (partial: Boolean, private var parts: Seq[Source], priva
             args = rest
             partialAttributes ++= arg
             parts match {
+              case Seq(part) =>
+                parts = Seq()
+                parser.partial = false
+                parser.feed(part)
               case Seq(part, rest @ _*) =>
                 parts = rest
                 parser.feed(part)
               case _ =>
-              // do nothing
+                throw new IllegalStateException
             }
           case _ =>
+            throw new Exception("invalid arguments")
+        }
+
+      case ExpectNodes if partial =>
+        args match {
+          case Seq(NodesTag(arg), rest @ _*) =>
+            args = rest
+            elements match {
+              case builder :: _ =>
+                builder ++= arg
+                parts match {
+                  case Seq(part) =>
+                    parts = Seq()
+                    parser.partial = false
+                    parser.feed(part)
+                  case Seq(part, rest @ _*) =>
+                    parts = rest
+                    parser.feed(part)
+                  case _ =>
+                    throw new IllegalStateException
+                }
+              case _ =>
+                throw new IllegalStateException
+            }
+          case _ =>
+            println(args)
             throw new Exception("invalid arguments")
         }
 
@@ -121,5 +151,7 @@ object DOMParser {
     new DOMParser(true, parts, args)
 
   private[parser] val AttributesTag = classTag[Attributes]
+
+  private[parser] val NodesTag = classTag[Seq[XmlNode]]
 
 }
