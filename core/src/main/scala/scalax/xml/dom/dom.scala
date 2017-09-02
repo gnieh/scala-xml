@@ -14,13 +14,14 @@
 * limitations under the License.
 */
 package scalax.xml
+package dom
 
-sealed trait Node
+sealed trait XmlNode
 
-case class Elem(name: QName, attributes: Attributes, children: Seq[Node]) extends Node
+case class Elem(name: QName, attributes: Map[QName, String], children: Seq[XmlNode]) extends XmlNode 
 
-case class Comment(content: String) extends Node
+case class Comment(content: String) extends XmlNode
 
-case class Text(content: String) extends Node
+case class Text(content: String) extends XmlNode
 
-case class CDATA(content: String) extends Node
+case class CDATA(content: String) extends XmlNode
