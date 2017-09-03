@@ -1,0 +1,17 @@
+# tests declaring entities
+115.xml
+089.xml
+066.xml
+088.xml
+118.xml
+085.xml
+053.xml
+068.xml
+114.xml
+110.xml
+023.xml
+024.xml
+086.xml
+087.xml
+108.xml
+117.xml

@@ -181,11 +181,28 @@ class XmlPullParser private (
     loop(0, 0)
   }
 
-  private def isNCNameStart(c: Char): Boolean =
-    c.isLetter || c == '_'
+  private def isNCNameStart(c: Char): Boolean = {
+    import java.lang.Character._
 
-  private def isNCNameChar(c: Char): Boolean =
-    c.isLetterOrDigit || c == '.' || c == '-' || c == '_'
+    getType(c).toByte match {
+      case LOWERCASE_LETTER |
+        UPPERCASE_LETTER | OTHER_LETTER |
+        TITLECASE_LETTER | LETTER_NUMBER => true
+      case _ => ":_".contains(c)
+    }
+  }
+
+  private def isNCNameChar(c: Char): Boolean = {
+    import java.lang.Character._
+    // The constants represent groups Mc, Me, Mn, Lm, and Nd.
+
+    isNCNameStart(c) || (getType(c).toByte match {
+      case COMBINING_SPACING_MARK |
+        ENCLOSING_MARK | NON_SPACING_MARK |
+        MODIFIER_LETTER | DECIMAL_DIGIT_NUMBER => true
+      case _ => ".-:·".contains(c)
+    })
+  }
 
   private def readNCName(): String = {
     val c = nextChar()
@@ -301,9 +318,9 @@ class XmlPullParser private (
   private def skipPI(): Unit =
     (nextChar(): @switch) match {
       case '?' =>
-        (nextChar(): @switch) match {
-          case '>' => // done
-          case _   => skipPI()
+        (peekChar(): @switch) match {
+          case Some('>') => nextChar()
+          case _         => skipPI()
         }
       case _ => skipPI()
     }
@@ -419,8 +436,11 @@ class XmlPullParser private (
     @tailrec
     def rest(acc: Int): Char =
       peekChar() match {
-        case Digit(d) => rest(acc * base + d)
-        case _        => fail("XML [66]: bad character reference digit")
+        case Digit(d) =>
+          nextChar()
+          rest(acc * base + d)
+        case _ =>
+          acc.toChar
       }
 
     nextCharOpt() match {
@@ -486,7 +506,7 @@ class XmlPullParser private (
           case _ =>
             readAttributeValue(delim, sb.append(' '))
         }
-      case Some(' ') | Some('\n') | Some('\t') =>
+      case Some(c) if c.isWhitespace =>
         readAttributeValue(delim, sb.append(' '))
       case Some('&') =>
         peekChar() match {
@@ -696,6 +716,9 @@ class XmlPullParser private (
         fail("XML [22]: unexpected end of input")
       case Some(PIToken(name)) if name.equalsIgnoreCase("xml") =>
         handleXmlDexl()
+      case Some(PIToken(name)) =>
+        skipPI()
+        scanPrologToken1()
       case Some(DeclToken(name)) =>
         handleDecl(name)
       case Some(StartToken(name)) =>
@@ -723,7 +746,7 @@ class XmlPullParser private (
   }
 
   private def handleXmlDexl(): XmlEvent = {
-    assert(c => c == ' ' || c == '\t' || c == '\r' || c == '\n', "XML [24]: space is expected after xml")
+    assert(_.isWhitespace, "XML [24]: space is expected after xml")
     space()
     val n = read("version")
     if (n == 7) {
@@ -759,7 +782,7 @@ class XmlPullParser private (
   @tailrec
   private def readEncoding(hasSpace: Boolean): (Boolean, Option[String]) =
     peekChar() match {
-      case Some(' ') =>
+      case Some(c) if c.isWhitespace =>
         space()
         readEncoding(true)
       case Some('e') =>
@@ -785,7 +808,7 @@ class XmlPullParser private (
   @tailrec
   private def readStandalone(hasSpace: Boolean): Option[Boolean] =
     peekChar() match {
-      case Some(' ') =>
+      case Some(c) if c.isWhitespace =>
         space()
         readStandalone(true)
       case Some('s') =>
@@ -821,7 +844,7 @@ class XmlPullParser private (
   private def handleDecl(name: String): XmlEvent =
     name match {
       case "DOCTYPE" =>
-        assert(c => c == ' ' || c == '\t' || c == '\r' || c == '\n', "XML [28]: space is expected after DOCTYPE")
+        assert(_.isWhitespace, "XML [28]: space is expected after DOCTYPE")
         space()
         val docname = readNCName()
         space()
@@ -837,8 +860,8 @@ class XmlPullParser private (
           case '[' =>
             skipInternalDTD()
             XmlDoctype(name, docname, systemid)
-          case _ =>
-            fail("XML [28]: end of doctype or itnernal DTD expected")
+          case c =>
+            fail(f"XML [28]: end of doctype or internal DTD expected but got $c")
         }
       case _ =>
         fail("XML [22]: expected DOCTYPE declaration")

@@ -52,7 +52,7 @@ lazy val publishSettings = Seq(
 
 lazy val xml = project.in(file("."))
   .enablePlugins(ScoverageSbtPlugin, ScalaUnidocPlugin)
-  .settings(commonSettings: _*)
+  .settings(commonSettings)
   .settings(
     name := "xml",
     packagedArtifacts := Map())
@@ -60,9 +60,9 @@ lazy val xml = project.in(file("."))
 
 lazy val core = project.in(file("core"))
   .enablePlugins(ScoverageSbtPlugin)
-  .settings(commonSettings: _*)
+  .settings(commonSettings)
   .settings(
     name := "xml-core",
     libraryDependencies ++= Seq(
       "org.scalatest" %% "scalatest" % "3.0.3" % Test,
-      "org.scalacheck" %% "scalacheck" % "1.13.5" % Test))
+      "com.github.pathikrit" %% "better-files" % "2.17.1" % Test))

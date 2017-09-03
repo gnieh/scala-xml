@@ -18,11 +18,16 @@ package parser
 
 import dom._
 
-import scala.io.Source
+import scala.io.{
+  Source,
+  Codec
+}
 
 import scala.collection.immutable.VectorBuilder
 
 import scala.reflect.classTag
+
+import java.io.File
 
 class DOMParser private (partial: Boolean, private var parts: Seq[Source], private var args: Seq[Any]) {
 
@@ -126,7 +131,7 @@ class DOMParser private (partial: Boolean, private var parts: Seq[Source], priva
     }
     (stack, elements) match {
       case (Nil, List(builder)) =>
-        builder.result() match {
+        builder.result().collect { case e @ Elem(_, _, _) => e } match {
           case Vector(root) => root
           case _            => throw new Exception("XML [1]: several root elements")
         }
@@ -156,6 +161,12 @@ object DOMParser {
 
   def fromString(str: String): DOMParser =
     new DOMParser(false, Seq(Source.fromString(str)), Seq.empty)
+
+  def fromFile(f: String)(implicit codec: Codec): DOMParser =
+    new DOMParser(false, Seq(Source.fromFile(f)), Seq.empty)
+
+  def fromFile(f: File)(implicit codec: Codec): DOMParser =
+    new DOMParser(false, Seq(Source.fromFile(f)), Seq.empty)
 
   def fromParts(parts: Seq[Source], args: Seq[Any]): DOMParser =
     new DOMParser(true, parts, args)
