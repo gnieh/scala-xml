@@ -20,20 +20,20 @@ import org.scalatest._
 
 import better.files._
 
-class ConformanceTest extends FlatSpec with Matchers {
+class ConformanceNotWFTest extends FlatSpec with Matchers {
 
-  val ignored = ("core" / "src" / "test" / "resources" / "conformance" / "valid" / "sa" / "ignored.txt").lines.map(_.trim).filterNot(l => l.isEmpty || l.startsWith("#")).toSet
+  val ignored = ("core" / "src" / "test" / "resources" / "conformance" / "not-wf" / "sa" / "ignored.txt").lines.map(_.trim).filterNot(l => l.isEmpty || l.startsWith("#")).toSet
 
-  for (f <- ("core" / "src" / "test" / "resources" / "conformance" / "valid" / "sa").list.filter(_.extension == Some(".xml"))) {
+  for (f <- ("core" / "src" / "test" / "resources" / "conformance" / "not-wf" / "sa").list.filter(_.extension == Some(".xml"))) {
     val scope =
       if (ignored.contains(f.name))
-        f"valid XML document $f" should "be parsed without errors" ignore {
+        f"not-wf XML document $f" should "be parsed with error" ignore {
         }
       else
-        f"valid XML document $f" should "be parsed without errors" in {
+        f"not-wf XML document $f" should "be parsed with error" in {
           try {
             val parser = DOMParser.fromFile(f.toJava)
-            parser.parse()
+            an[ParserException] should be thrownBy parser.parse()
           } catch {
             case _: java.nio.charset.MalformedInputException =>
               import java.nio.charset.CodingErrorAction
@@ -41,7 +41,7 @@ class ConformanceTest extends FlatSpec with Matchers {
 
               implicit val codec = Codec("UTF-16")
               val parser = DOMParser.fromFile(f.toJava)
-              parser.parse()
+              an[ParserException] should be thrownBy parser.parse()
           }
         }
   }
