@@ -20,6 +20,8 @@ sealed trait XmlEvent
 
 case object StartDocument extends XmlEvent
 
+final case class XmlDecl(version: String, encoding: Option[String], standalone: Option[Boolean]) extends XmlEvent
+
 final case class StartTag(name: QName, attributes: Attributes, isEmpty: Boolean) extends XmlEvent
 
 final case class XmlString(s: String, isCDATA: Boolean) extends XmlEvent

@@ -690,6 +690,21 @@ class XmlPullParser private (
 
   // ==== high-level internals
 
+  private def scanPrologToken0(): XmlEvent = {
+    scanMisc() match {
+      case None =>
+        fail("XML [22]: unexpected end of input")
+      case Some(PIToken(name)) if name.equalsIgnoreCase("xml") =>
+        handleXmlDexl()
+      case Some(DeclToken(name)) =>
+        handleDecl(name)
+      case Some(StartToken(name)) =>
+        readElement(name)
+      case Some(t) =>
+        fail(f"XML [22]: unexpected markup $t")
+    }
+  }
+
   @tailrec
   private def scanPrologToken1(): XmlEvent = {
     scanMisc() match {
@@ -706,6 +721,102 @@ class XmlPullParser private (
         fail(f"XML [22]: unexpected markup $t")
     }
   }
+
+  private def handleXmlDexl(): XmlEvent = {
+    assert(c => c == ' ' || c == '\t' || c == '\r' || c == '\n', "XML [24]: space is expected after xml")
+    space()
+    val n = read("version")
+    if (n == 7) {
+      space()
+      accept('=', "XML [24]: expected '=' after version")
+      space()
+      val delimiter = assert(c => c == '"' || c == '\'', "XML [24]: simple or double quote expected")
+      accept('1', "XML [26]: expected major version 1")
+      accept('.', "XML [26]: expected dot")
+      val minor = untilChar(!_.isDigit, new StringBuilder("1.")).toString
+      if (minor.length == 2)
+        fail("XML [26]: expected non empty minor version")
+      accept(delimiter, "XML [24]: expected delimiter to close version attribute value")
+
+      val (hasSpace, encoding) = readEncoding(false)
+      val standalone = readStandalone(hasSpace)
+      space()
+      (nextChar(): @switch) match {
+        case '?' =>
+          (nextChar(): @switch) match {
+            case '>' => XmlDecl(minor, encoding, standalone)
+            case _ =>
+              fail("XML [23]: expected end of PI")
+          }
+        case _ =>
+          fail("XML [23]: expected end of PI")
+      }
+    } else {
+      fail("XML [24]: expected 'version' attribute")
+    }
+  }
+
+  @tailrec
+  private def readEncoding(hasSpace: Boolean): (Boolean, Option[String]) =
+    peekChar() match {
+      case Some(' ') =>
+        space()
+        readEncoding(true)
+      case Some('e') =>
+        if (hasSpace) {
+          val n = read("encoding")
+          if (n != 8)
+            fail("XML [80]: expected 'encoding' attribute")
+          space()
+          accept('=', "XML [80]: expected '='")
+          space()
+          val delimiter = assert(c => c == '"' || c == '\'', "XML [80]: simple or double quote expected")
+          val fst = assert(c => (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'), "XML [81]: wrong encoding name character")
+          val encoding = untilChar(c => !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-'), new StringBuilder().append(fst)).toString
+          accept(delimiter, "XML [80]: 'encoding' attribute value must end with proper delimiter")
+          (false, Some(encoding))
+        } else {
+          fail("XML [80]: expected space before 'encoding' attrbute")
+        }
+      case _ =>
+        (hasSpace, None)
+    }
+
+  @tailrec
+  private def readStandalone(hasSpace: Boolean): Option[Boolean] =
+    peekChar() match {
+      case Some(' ') =>
+        space()
+        readStandalone(true)
+      case Some('s') =>
+        if (hasSpace) {
+          val n = read("standalone")
+          if (n != 10)
+            fail("XML [32]: expected 'standalone' attribute")
+          space()
+          accept('=', "XML [32]: expected '='")
+          space()
+          val delimiter = assert(c => c == '"' || c == '\'', "XML [32]: simple or double quote expected")
+          val value = (nextChar(): @switch) match {
+            case 'y' =>
+              if (read("es") == 2)
+                true
+              else
+                fail("XML [32]: expected 'yes' or 'no'")
+            case 'n' =>
+              accept('o', "XML [32]: expected 'yes' or 'no'")
+              false
+            case _ =>
+              fail("XML [32]: expected 'yes' or 'no'")
+          }
+          accept(delimiter, "XML [32]: 'standalone' attribute value must end with proper delimiter")
+          Some(value)
+        } else {
+          fail("XML [32]: expected space before 'standalone' attrbute")
+        }
+      case _ =>
+        None
+    }
 
   private def handleDecl(name: String): XmlEvent =
     name match {
@@ -749,6 +860,8 @@ class XmlPullParser private (
 
   private def scan(): XmlEvent = previousEvent match {
     case StartDocument =>
+      scanPrologToken0()
+    case XmlDecl(_, _, _) =>
       scanPrologToken1()
     case XmlDoctype(_, _, _) =>
       scanPrologToken2()

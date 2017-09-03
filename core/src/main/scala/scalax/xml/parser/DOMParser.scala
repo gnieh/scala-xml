@@ -31,6 +31,9 @@ class DOMParser private (partial: Boolean, private var parts: Seq[Source], priva
   def predefinedEntities: Map[String, String] = predefEntities
 
   private val parser = parts match {
+    case Seq(part) =>
+      parts = Nil
+      new XmlPullParser(part, predefinedEntities, Map.empty, false)
     case Seq(fst, rest @ _*) =>
       parts = rest
       new XmlPullParser(fst, predefinedEntities, Map.empty, partial)
@@ -115,7 +118,6 @@ class DOMParser private (partial: Boolean, private var parts: Seq[Source], priva
                 throw new IllegalStateException
             }
           case _ =>
-            println(args)
             throw new Exception("invalid arguments")
         }
 
