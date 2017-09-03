@@ -1,4 +1,3 @@
-val scala210 = "2.10.6"
 val scala211 = "2.11.11"
 val scala212 = "2.12.3"
 
@@ -9,7 +8,7 @@ lazy val commonSettings = Seq(
   description := "Scala XML library revisited",
   licenses += ("The Apache Software License, Version 2.0" -> url("http://www.apache.org/licenses/LICENSE-2.0.txt")),
   homepage := Some(url("https://github.com/gnieh/scala-xml")),
-  crossScalaVersions := Seq(scala210, scala211, scala212),
+  crossScalaVersions := Seq(scala211, scala212),
   parallelExecution := false,
   fork in test := true,
   scalacOptions in (Compile,doc) ++= Seq("-groups", "-implicits"),

@@ -1,0 +1,25 @@
+language: scala
+
+# only trigger builds on master
+branches:
+  only:
+    - master
+
+before_script:
+  - sudo chmod +x /usr/local/bin/sbt
+
+script:
+  - sbt clean coverage test coverageReport coverageAggregate
+
+scala:
+   - 2.11.11
+   - 2.12.3
+
+before_install:
+    - pip install --user codecov
+
+after_success:
+  - codecov
+
+jdk:
+  - oraclejdk8
