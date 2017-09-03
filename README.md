@@ -1,1 +1,1 @@
-# Scala XML [![Build Status](https://travis-ci.org/gnieh/scala-xml.svg?branch=master)](https://travis-ci.org/gnieh/scala-xml)
+# Scala XML [![Build Status](https://travis-ci.org/gnieh/scala-xml.svg?branch=master)](https://travis-ci.org/gnieh/scala-xml) [![codecov](https://codecov.io/gh/gnieh/scala-xml/branch/master/graph/badge.svg)](https://codecov.io/gh/gnieh/scala-xml)
