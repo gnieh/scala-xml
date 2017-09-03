@@ -16,24 +16,30 @@
 package scalax.xml
 package parser
 
-sealed trait XmlEvent
+sealed trait XmlEvent {
+  val line: Int
+  val column: Int
+}
 
-case object StartDocument extends XmlEvent
+case object StartDocument extends XmlEvent {
+  val line = 1
+  val column = 1
+}
 
-final case class XmlDecl(version: String, encoding: Option[String], standalone: Option[Boolean]) extends XmlEvent
+final case class XmlDecl(version: String, encoding: Option[String], standalone: Option[Boolean])(val line: Int, val column: Int) extends XmlEvent
 
-final case class StartTag(name: QName, attributes: Attributes, isEmpty: Boolean) extends XmlEvent
+final case class StartTag(name: QName, attributes: Attributes, isEmpty: Boolean)(val line: Int, val column: Int) extends XmlEvent
 
-final case class XmlString(s: String, isCDATA: Boolean) extends XmlEvent
+final case class XmlString(s: String, isCDATA: Boolean)(val line: Int, val column: Int) extends XmlEvent
 
-final case class XmlDoctype(name: String, docname: String, systemid: Option[String]) extends XmlEvent
+final case class XmlDoctype(name: String, docname: String, systemid: Option[String])(val line: Int, val column: Int) extends XmlEvent
 
-final case class EndTag(name: QName) extends XmlEvent
+final case class EndTag(name: QName)(val line: Int, val column: Int) extends XmlEvent
 
-case object EndDocument extends XmlEvent
+final case class EndDocument()(val line: Int, val column: Int) extends XmlEvent
 
-final case class ExpectAttributes(name: QName, attributes: Attributes) extends XmlEvent
+final case class ExpectAttributes(name: QName, attributes: Attributes)(val line: Int, val column: Int) extends XmlEvent
 
-final case class ExpectAttributeValue(tname: QName, attributes: Attributes, aname: QName) extends XmlEvent
+final case class ExpectAttributeValue(tname: QName, attributes: Attributes, aname: QName)(val line: Int, val column: Int) extends XmlEvent
 
-case object ExpectNodes extends XmlEvent
+final case class ExpectNodes()(val line: Int, val column: Int) extends XmlEvent

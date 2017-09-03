@@ -54,7 +54,7 @@ class XmlPullParser private (
   def hasNext(): Boolean = nextEvent match {
     case null =>
       previousEvent match {
-        case EndDocument =>
+        case EndDocument() =>
           false
         case _ =>
           nextEvent = scan()
@@ -81,16 +81,20 @@ class XmlPullParser private (
 
   // ==== low-level internals
 
-  private var sawCR = false
-  private var line = 1
-  private var column = 0
+  private def currentInput = inputs.headOption
+
+  private def line = currentInput.fold(0)(_.RelaxedPositioner.cline)
+
+  private def column = currentInput.fold(0)(_.RelaxedPositioner.ccol)
+
+  private var level = 0
 
   private def fail(msg: String): Nothing = {
     Try(inputs.foreach(_.close()))
     throw new ParserException(line, column, msg)
   }
 
-  private var buffer = Option.empty[Char]
+  private var buffer = Queue.empty[Char]
 
   @tailrec
   private def readInput(): Unit =
@@ -98,40 +102,28 @@ class XmlPullParser private (
       case Some((input, rest)) =>
         if (input.hasNext) {
           val c = input.next()
-          c match {
-            case '\n' =>
-              line += 1
-              column = 0
-              sawCR = false
-            case '\r' =>
-              sawCR = true
-            case _ if sawCR =>
-              line += 1
-              column = 0
-              sawCR = false
-            case _ =>
-              sawCR = false
-              column += 1
-          }
-          buffer = Some(c)
+          if (isValid(c))
+            buffer = buffer.enqueue(c)
+          else
+            fail("XML [2]: forbidden character")
         } else {
           input.close()
           inputs = rest
           readInput()
         }
       case None =>
-        buffer = None
+        buffer = Queue.empty[Char]
     }
 
   private def peekChar(): Option[Char] =
-    buffer.orElse {
+    buffer.headOption.orElse {
       readInput()
-      buffer
+      buffer.headOption
     }
 
   private def nextCharOpt(): Option[Char] = {
     val c = peekChar()
-    buffer = None
+    buffer = buffer.tail
     c
   }
 
@@ -180,6 +172,13 @@ class XmlPullParser private (
       }
     loop(0, 0)
   }
+
+  // characters under 0x10000 are in UTF-16 with surrogate blocks
+  private def isValid(c: Int): Boolean =
+    (0x10000 <= c && c <= 0x10ffff) || (c < 0x10000 && c != 0xfffe && c != 0xffff)
+
+  private def isSpace(c: Char): Boolean =
+    c == ' ' || c == '\t' || c == '\r' || c == '\n'
 
   private def isNCNameStart(c: Char): Boolean = {
     import java.lang.Character._
@@ -248,7 +247,7 @@ class XmlPullParser private (
     @tailrec
     def loop(): Unit =
       peekChar() match {
-        case Some(c) if c.isWhitespace =>
+        case Some(c) if isSpace(c) =>
           nextChar()
           loop()
         case _ =>
@@ -260,35 +259,37 @@ class XmlPullParser private (
   /** Reads the nextChar markup token */
   private def readMarkupToken(): MarkupToken = {
     accept('<', "XML [43]: expected token start")
+    val l = line
+    val c = column
     peekChar() match {
       case Some('/') =>
         nextChar()
         val qname = readQName()
         space()
         accept('>', "XML [42]: missing '>' at the end of closing tag")
-        EndToken(qname)
+        EndToken(qname, l, c)
       case Some('?') =>
         nextChar()
-        PIToken(readNCName())
+        PIToken(readNCName(), l, c)
       case Some('!') =>
         nextChar()
         peekChar() match {
           case Some('-') =>
             nextChar()
-            skipComment()
+            skipComment(l, c)
           case Some('[') =>
             nextChar()
-            readCDATA()
+            readCDATA(l, c)
           case _ =>
-            DeclToken(readNCName())
+            DeclToken(readNCName(), l, c)
         }
       case _ =>
-        StartToken(readQName())
+        StartToken(readQName(), l, c)
     }
   }
 
   /** We have read '<!-' so far */
-  private def skipComment(): CommentToken.type = {
+  private def skipComment(l: Int, c: Int): CommentToken = {
     accept('-', "XML [15]: second dash missing to open comment")
     def loop(): Unit = (nextChar(): @switch) match {
       case '-' =>
@@ -302,15 +303,15 @@ class XmlPullParser private (
         loop()
     }
     loop()
-    CommentToken
+    CommentToken(l, c)
   }
 
   /** We have read '<![' so far */
-  private def readCDATA(): CDataToken.type = {
+  private def readCDATA(l: Int, c: Int): CDataToken = {
     val n = read("CDATA[")
     if (n < 6)
       fail("XML [19]: 'CDATA[' expected")
-    CDataToken
+    CDataToken(l, c)
   }
 
   /** inside a PI read until final '?>' */
@@ -360,13 +361,13 @@ class XmlPullParser private (
 
   private def readExternalID(): String = {
     val sysOrPub = readNCName()
-    assert(_.isWhitespace, "XML [75]: space required after SYSTEM or PUBLIC")
+    assert(isSpace(_), "XML [75]: space required after SYSTEM or PUBLIC")
     sysOrPub match {
       case "SYSTEM" =>
         readQuoted()
       case "PUBLIC" =>
         readQuoted()
-        assert(_.isWhitespace, "XML [12]: space required after PubidLiteral")
+        assert(isSpace(_), "XML [12]: space required after PubidLiteral")
         readQuoted()
       case _ =>
         fail("XML [75]: SYSTEM or PUBLIC expected")
@@ -387,11 +388,11 @@ class XmlPullParser private (
     peekChar() match {
       case None => None
       case Some('<') => readMarkupToken() match {
-        case CommentToken      => scanMisc()
-        case t @ PIToken(_)    => Some(t)
-        case t @ DeclToken(_)  => Some(t)
-        case t @ StartToken(_) => Some(t)
-        case t                 => fail(f"XML [22]: unexpected token '$t'")
+        case CommentToken(_, _)      => scanMisc()
+        case t @ PIToken(_, _, _)    => Some(t)
+        case t @ DeclToken(_, _, _)  => Some(t)
+        case t @ StartToken(_, _, _) => Some(t)
+        case t                       => fail(f"XML [22]: unexpected token '$t'")
       }
       case Some(c) => fail(f"XML [22]: unexpected character '$c'")
     }
@@ -401,8 +402,23 @@ class XmlPullParser private (
   def readCharRef(): Char = {
     def postlude(n: Int) =
       (nextChar(): @switch) match {
-        case ';' => n.toChar
-        case _   => fail("XML [66]: character reference must end with a semicolon")
+        case ';' =>
+          if (isValid(n))
+            if (n < 0x10000) {
+              n.toChar
+            } else {
+              // get the surrogate characters
+              val Array(c, cs @ _*) = Character.toChars(n)
+              buffer = cs.foldRight(buffer) { (c, buffer) =>
+                c +: buffer
+              }
+              c
+            }
+          else {
+            fail("XML [2]: invalid character")
+          }
+        case _ =>
+          fail("XML [66]: character reference must end with a semicolon")
       }
     peekChar() match {
       case Some('x') =>
@@ -423,9 +439,9 @@ class XmlPullParser private (
             if ((base == 10 || base == 16) && '0' <= c && c <= '9')
               Some(c - '0')
             else if (base == 16 && 'a' <= c && c <= 'f')
-              Some(c - 'a')
+              Some(c - 'a' + 10)
             else if (base == 16 && 'A' <= c && c <= 'F')
-              Some(c - 'A')
+              Some(c - 'A' + 10)
             else
               None
           case None =>
@@ -434,13 +450,13 @@ class XmlPullParser private (
     }
 
     @tailrec
-    def rest(acc: Int): Char =
+    def rest(acc: Int): Int =
       peekChar() match {
         case Digit(d) =>
           nextChar()
           rest(acc * base + d)
         case _ =>
-          acc.toChar
+          acc
       }
 
     nextCharOpt() match {
@@ -468,7 +484,7 @@ class XmlPullParser private (
         }
     }
 
-  private def readAttributes(tname: QName): Either[Attributes, ExpectAttributeValue] = {
+  private def readAttributes(tname: QName, l: Int, c: Int): Either[Attributes, ExpectAttributeValue] = {
     @tailrec
     def loop(attributes: VectorBuilder[Attribute]): Either[Attributes, ExpectAttributeValue] = {
       space()
@@ -479,7 +495,7 @@ class XmlPullParser private (
           accept('=', "XML [25]: '=' character expected")
           space()
           if (partial && peekChar().isEmpty) {
-            Right(ExpectAttributeValue(tname, attributes.result(), name))
+            Right(ExpectAttributeValue(tname, attributes.result(), name)(l, c))
           } else {
             val delimiter = assert(c => c == '"' || c == '\'', "XML [10]: single or double quote expected around attribute value")
             val value = readAttributeValue(Some(delimiter), new StringBuilder)
@@ -506,7 +522,7 @@ class XmlPullParser private (
           case _ =>
             readAttributeValue(delim, sb.append(' '))
         }
-      case Some(c) if c.isWhitespace =>
+      case Some(c) if isSpace(c) =>
         readAttributeValue(delim, sb.append(' '))
       case Some('&') =>
         peekChar() match {
@@ -529,15 +545,15 @@ class XmlPullParser private (
     parsedEntitiy(name)
   }
 
-  private def completeStartTag(name: QName): XmlEvent = {
-    readAttributes(name) match {
+  private def completeStartTag(name: QName, l: Int, c: Int): XmlEvent = {
+    readAttributes(name, l, c) match {
       case Left(attributes) =>
         space()
         if (partial && peekChar().isEmpty) {
           // end of current inputs but partial parse is enabled
           // emit the appropriate event to feed with custom attributes
           // before continuing.
-          ExpectAttributes(name, attributes)
+          ExpectAttributes(name, attributes)(l, c)
         } else {
           val isEmpty = peekChar() match {
             case Some('/') =>
@@ -576,7 +592,7 @@ class XmlPullParser private (
 
           val resolved = resolveQName(name, true)
 
-          StartTag(resolved, proper, isEmpty)
+          StartTag(resolved, proper, isEmpty)(l, c)
         }
       case Right(evt) =>
         evt
@@ -646,65 +662,73 @@ class XmlPullParser private (
     peekChar() match {
       case Some('<') =>
         readMarkupToken() match {
-          case CommentToken =>
+          case CommentToken(l, c) =>
             readCharData()
-          case DeclToken(n) =>
+          case DeclToken(n, l, c) =>
             fail(f"Unexpected declaration '$n'")
-          case CDataToken =>
+          case CDataToken(l, c) =>
             val body = readCDATABody(new StringBuilder)
-            XmlString(body, true)
-          case EndToken(name) =>
-            EndTag(name)
-          case StartToken(name) =>
-            completeStartTag(name)
-          case PIToken(target) =>
+            XmlString(body, true)(l, c)
+          case EndToken(name, l, c) =>
+            EndTag(name)(l, c)
+          case StartToken(name, l, c) =>
+            completeStartTag(name, l, c)
+          case PIToken(target, l, c) =>
             skipPI()
             readCharData()
           case t =>
             fail(f"XML [43]: unexpected token $t")
         }
-      case Some(_)         => slowPath(new StringBuilder)
-      case None if partial => ExpectNodes
-      case None            => EndDocument
+      case Some(c) if level == 0 =>
+        // at the root level, only space characters are allowed
+        if (isSpace(c)) {
+          space()
+          readCharData()
+        } else {
+          fail("XML [27]: only space character data is allowed")
+        }
+      case Some(_)         => slowPath(new StringBuilder, line, column)
+      case None if partial => ExpectNodes()(line, column)
+      case None            => EndDocument()(line, column)
     }
 
   @tailrec
-  private def slowPath(sb: StringBuilder): XmlEvent = {
+  private def slowPath(sb: StringBuilder, l: Int, c: Int): XmlEvent = {
     untilChar(c => c == '<' || c == '&' || c == '\r', sb)
     peekChar() match {
-      case Some('<') => XmlString(sb.toString, false)
-      case None      => XmlString(sb.toString, false)
+      case Some('<') => XmlString(sb.toString, false)(l, c)
+      case None      => XmlString(sb.toString, false)(l, c)
       case Some('&') =>
         nextChar()
         peekChar() match {
           case Some('#') =>
             nextChar()
             sb.append(readCharRef())
-            slowPath(sb)
+            slowPath(sb, l, c)
           case _ =>
             val v = readNamedEntity()
             sb.append(v)
-            slowPath(sb)
+            slowPath(sb, l, c)
         }
       case _ =>
         nextChar()
         peekChar() match {
           case Some('\n') =>
             sb.append(nextChar())
-            slowPath(sb)
+            slowPath(sb, l, c)
           case _ =>
             sb.append('\n')
-            slowPath(sb)
+            slowPath(sb, l, c)
         }
     }
   }
 
-  private def readElement(start: QName): XmlEvent =
-    completeStartTag(start)
+  private def readElement(start: QName, l: Int, c: Int): XmlEvent =
+    completeStartTag(start, l, c)
 
   private def readContent(): XmlEvent =
     if (partial && peekChar().isEmpty)
-      ExpectNodes
+      ExpectNodes()(line, column)
     else
       readCharData()
 
@@ -714,15 +738,15 @@ class XmlPullParser private (
     scanMisc() match {
       case None =>
         fail("XML [22]: unexpected end of input")
-      case Some(PIToken(name)) if name.equalsIgnoreCase("xml") =>
-        handleXmlDexl()
-      case Some(PIToken(name)) =>
+      case Some(PIToken(name, l, c)) if name.equalsIgnoreCase("xml") =>
+        handleXmlDecl(l, c)
+      case Some(PIToken(name, l, c)) =>
         skipPI()
         scanPrologToken1()
-      case Some(DeclToken(name)) =>
-        handleDecl(name)
-      case Some(StartToken(name)) =>
-        readElement(name)
+      case Some(DeclToken(name, l, c)) =>
+        handleDecl(name, l, c)
+      case Some(StartToken(name, l, c)) =>
+        readElement(name, l, c)
       case Some(t) =>
         fail(f"XML [22]: unexpected markup $t")
     }
@@ -733,20 +757,20 @@ class XmlPullParser private (
     scanMisc() match {
       case None =>
         fail("XML [22]: unexpected end of input")
-      case Some(PIToken(name)) =>
+      case Some(PIToken(name, l, c)) =>
         skipPI()
         scanPrologToken1()
-      case Some(DeclToken(name)) =>
-        handleDecl(name)
-      case Some(StartToken(name)) =>
-        readElement(name)
+      case Some(DeclToken(name, l, c)) =>
+        handleDecl(name, l, c)
+      case Some(StartToken(name, l, c)) =>
+        readElement(name, l, c)
       case Some(t) =>
         fail(f"XML [22]: unexpected markup $t")
     }
   }
 
-  private def handleXmlDexl(): XmlEvent = {
-    assert(_.isWhitespace, "XML [24]: space is expected after xml")
+  private def handleXmlDecl(l: Int, c: Int): XmlEvent = {
+    assert(isSpace(_), "XML [24]: space is expected after xml")
     space()
     val n = read("version")
     if (n == 7) {
@@ -767,7 +791,7 @@ class XmlPullParser private (
       (nextChar(): @switch) match {
         case '?' =>
           (nextChar(): @switch) match {
-            case '>' => XmlDecl(minor, encoding, standalone)
+            case '>' => XmlDecl(minor, encoding, standalone)(l, c)
             case _ =>
               fail("XML [23]: expected end of PI")
           }
@@ -782,7 +806,7 @@ class XmlPullParser private (
   @tailrec
   private def readEncoding(hasSpace: Boolean): (Boolean, Option[String]) =
     peekChar() match {
-      case Some(c) if c.isWhitespace =>
+      case Some(c) if isSpace(c) =>
         space()
         readEncoding(true)
       case Some('e') =>
@@ -808,7 +832,7 @@ class XmlPullParser private (
   @tailrec
   private def readStandalone(hasSpace: Boolean): Option[Boolean] =
     peekChar() match {
-      case Some(c) if c.isWhitespace =>
+      case Some(c) if isSpace(c) =>
         space()
         readStandalone(true)
       case Some('s') =>
@@ -841,10 +865,10 @@ class XmlPullParser private (
         None
     }
 
-  private def handleDecl(name: String): XmlEvent =
+  private def handleDecl(name: String, l: Int, c: Int): XmlEvent =
     name match {
       case "DOCTYPE" =>
-        assert(_.isWhitespace, "XML [28]: space is expected after DOCTYPE")
+        assert(isSpace(_), "XML [28]: space is expected after DOCTYPE")
         space()
         val docname = readNCName()
         space()
@@ -856,10 +880,10 @@ class XmlPullParser private (
         nextChar() match {
           case '>' =>
             // done
-            XmlDoctype(name, docname, systemid)
+            XmlDoctype(name, docname, systemid)(l, c)
           case '[' =>
             skipInternalDTD()
-            XmlDoctype(name, docname, systemid)
+            XmlDoctype(name, docname, systemid)(l, c)
           case c =>
             fail(f"XML [28]: end of doctype or internal DTD expected but got $c")
         }
@@ -872,11 +896,11 @@ class XmlPullParser private (
     scanMisc() match {
       case None =>
         fail("XML [22]: unexpected end of input")
-      case Some(PIToken(name)) =>
+      case Some(PIToken(name, l, c)) =>
         skipPI()
         scanPrologToken2()
-      case Some(StartToken(name)) =>
-        readElement(name)
+      case Some(StartToken(name, l, c)) =>
+        readElement(name, l, c)
       case Some(t) =>
         fail(f"XML [22]: unexpected markup $t")
     }
@@ -889,20 +913,22 @@ class XmlPullParser private (
     case XmlDoctype(_, _, _) =>
       scanPrologToken2()
     case StartTag(name, _, true) =>
-      EndTag(name)
+      EndTag(name)(previousEvent.line, previousEvent.column)
     case StartTag(_, _, _) =>
+      level += 1
       readContent()
     case EndTag(_) =>
+      level -= 1
       readCharData()
     case XmlString(_, _) =>
       readCharData()
-    case EndDocument =>
+    case EndDocument() =>
       throw new NoSuchElementException
     case ExpectAttributes(name, _) =>
-      completeStartTag(name)
+      completeStartTag(name, previousEvent.line, previousEvent.column)
     case ExpectAttributeValue(name, _, _) =>
-      completeStartTag(name)
-    case ExpectNodes =>
+      completeStartTag(name, previousEvent.line, previousEvent.column)
+    case ExpectNodes() =>
       readContent()
   }
 

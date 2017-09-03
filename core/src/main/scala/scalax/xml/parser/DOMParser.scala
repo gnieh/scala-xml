@@ -43,7 +43,7 @@ class DOMParser private (partial: Boolean, private var parts: Seq[Source], priva
       parts = rest
       new XmlPullParser(fst, predefinedEntities, Map.empty, partial)
     case Seq() =>
-      throw new Exception("at least one part must be provided")
+      throw new IllegalArgumentException("at least one part must be provided")
   }
 
   private var stack: List[StartTag] = Nil
@@ -51,6 +51,9 @@ class DOMParser private (partial: Boolean, private var parts: Seq[Source], priva
   private var elements: List[VectorBuilder[XmlNode]] = List(new VectorBuilder)
 
   private val partialAttributes = new VectorBuilder[Attribute]
+
+  private def fail(line: Int, column: Int, msg: String) =
+    throw new ParserException(0, 0, msg)
 
   def parse(): XmlNode = {
     for (evt <- parser) evt match {
@@ -64,7 +67,7 @@ class DOMParser private (partial: Boolean, private var parts: Seq[Source], priva
             val attrs = partialAttributes.result().foldLeft(Map.empty[QName, String]) {
               case (acc, attr @ Attribute(name, value)) =>
                 if (acc.contains(name))
-                  throw new Exception(f"[uniqattspec]: duplicate attribite with name $name")
+                  fail(evt.line, evt.column, f"[uniqattspec]: duplicate attribite with name $name")
                 acc.updated(name, value)
             }
             builder += Elem(sname, attrs, content.result())
@@ -73,7 +76,7 @@ class DOMParser private (partial: Boolean, private var parts: Seq[Source], priva
             partialAttributes.clear()
 
           case (StartTag(sname, attributes, _) :: _, _) =>
-            throw new Exception(f"[GIMatch]: expected closing tag '$sname' but got closing tag '$ename'")
+            fail(evt.line, evt.column, f"[GIMatch]: expected closing tag '$sname' but got closing tag '$ename'")
           case _ =>
             throw new IllegalStateException
         }
@@ -95,7 +98,7 @@ class DOMParser private (partial: Boolean, private var parts: Seq[Source], priva
             partialAttributes ++= arg
             feedNextPart()
           case _ =>
-            throw new Exception("invalid arguments")
+            throw new IllegalArgumentException
         }
       case ExpectAttributeValue(_, attrs, name) if partial =>
         partialAttributes ++= attrs
@@ -109,9 +112,9 @@ class DOMParser private (partial: Boolean, private var parts: Seq[Source], priva
             partialAttributes += Attribute(name, arg.toString)
             feedNextPart()
           case _ =>
-            throw new Exception("invalid arguments")
+            throw new IllegalArgumentException
         }
-      case ExpectNodes if partial =>
+      case ExpectNodes() if partial =>
         args match {
           case Seq(NodesTag(arg), rest @ _*) =>
             args = rest
@@ -123,7 +126,7 @@ class DOMParser private (partial: Boolean, private var parts: Seq[Source], priva
                 throw new IllegalStateException
             }
           case _ =>
-            throw new Exception("invalid arguments")
+            throw new IllegalArgumentException
         }
 
       case _ =>
@@ -131,12 +134,15 @@ class DOMParser private (partial: Boolean, private var parts: Seq[Source], priva
     }
     (stack, elements) match {
       case (Nil, List(builder)) =>
-        builder.result().collect { case e @ Elem(_, _, _) => e } match {
-          case Vector(root) => root
-          case _            => throw new Exception("XML [1]: several root elements")
+        val roots = builder.result().collect {
+          case e @ Elem(_, _, _) => e
         }
-      case (StartTag(name, _, _) :: _, _) =>
-        throw new Exception(f"XML [39]: unclosed element $name")
+        roots match {
+          case Vector(root) => root
+          case _            => fail(1, 1, "XML [1]: several root elements")
+        }
+      case ((evt @ StartTag(name, _, _)) :: _, _) =>
+        fail(evt.line, evt.column, f"XML [39]: unclosed element $name")
       case _ =>
         throw new IllegalStateException
     }
