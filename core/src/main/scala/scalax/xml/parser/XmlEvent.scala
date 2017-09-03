@@ -32,4 +32,6 @@ case object EndDocument extends XmlEvent
 
 final case class ExpectAttributes(name: QName, attributes: Attributes) extends XmlEvent
 
+final case class ExpectAttributeValue(tname: QName, attributes: Attributes, aname: QName) extends XmlEvent
+
 case object ExpectNodes extends XmlEvent

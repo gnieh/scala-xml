@@ -28,10 +28,12 @@ class DOMParser private (partial: Boolean, private var parts: Seq[Source], priva
 
   import DOMParser._
 
+  def predefinedEntities: Map[String, String] = predefEntities
+
   private val parser = parts match {
     case Seq(fst, rest @ _*) =>
       parts = rest
-      new XmlPullParser(fst, Map.empty, Map.empty, partial)
+      new XmlPullParser(fst, predefinedEntities, Map.empty, partial)
     case Seq() =>
       throw new Exception("at least one part must be provided")
   }
@@ -83,21 +85,24 @@ class DOMParser private (partial: Boolean, private var parts: Seq[Source], priva
           case Seq(AttributesTag(arg), rest @ _*) =>
             args = rest
             partialAttributes ++= arg
-            parts match {
-              case Seq(part) =>
-                parts = Seq()
-                parser.partial = false
-                parser.feed(part)
-              case Seq(part, rest @ _*) =>
-                parts = rest
-                parser.feed(part)
-              case _ =>
-                throw new IllegalStateException
-            }
+            feedNextPart()
           case _ =>
             throw new Exception("invalid arguments")
         }
-
+      case ExpectAttributeValue(_, attrs, name) if partial =>
+        partialAttributes ++= attrs
+        args match {
+          case Seq(null, rest @ _*) =>
+            // null value, just skip this attribute
+            args == rest
+            feedNextPart()
+          case Seq(arg, rest @ _*) =>
+            args = rest
+            partialAttributes += Attribute(name, arg.toString)
+            feedNextPart()
+          case _ =>
+            throw new Exception("invalid arguments")
+        }
       case ExpectNodes if partial =>
         args match {
           case Seq(NodesTag(arg), rest @ _*) =>
@@ -105,17 +110,7 @@ class DOMParser private (partial: Boolean, private var parts: Seq[Source], priva
             elements match {
               case builder :: _ =>
                 builder ++= arg
-                parts match {
-                  case Seq(part) =>
-                    parts = Seq()
-                    parser.partial = false
-                    parser.feed(part)
-                  case Seq(part, rest @ _*) =>
-                    parts = rest
-                    parser.feed(part)
-                  case _ =>
-                    throw new IllegalStateException
-                }
+                feedNextPart()
               case _ =>
                 throw new IllegalStateException
             }
@@ -140,6 +135,19 @@ class DOMParser private (partial: Boolean, private var parts: Seq[Source], priva
     }
   }
 
+  private def feedNextPart() =
+    parts match {
+      case Seq(part) =>
+        parts = Seq()
+        parser.partial = false
+        parser.feed(part)
+      case Seq(part, rest @ _*) =>
+        parts = rest
+        parser.feed(part)
+      case _ =>
+        throw new IllegalStateException
+    }
+
 }
 
 object DOMParser {
@@ -153,5 +161,12 @@ object DOMParser {
   private[parser] val AttributesTag = classTag[Attributes]
 
   private[parser] val NodesTag = classTag[Seq[XmlNode]]
+
+  private[parser] val predefEntities = Map(
+    "lt" -> "<",
+    "gt" -> ">",
+    "amp" -> "&",
+    "apos" -> "'",
+    "quot" -> "\"")
 
 }

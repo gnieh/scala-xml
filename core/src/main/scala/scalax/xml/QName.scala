@@ -27,3 +27,10 @@ case class QName(prefix: Option[String], local: String, uri: Option[URI]) {
   def isResolved = !prefix.isDefined || uri.isDefined
 
 }
+
+object QName {
+
+  def apply(n: String): QName =
+    QName(None, n, None)
+
+}

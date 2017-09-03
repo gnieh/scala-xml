@@ -448,9 +448,9 @@ class XmlPullParser private (
         }
     }
 
-  private def readAttributes(): Attributes = {
+  private def readAttributes(tname: QName): Either[Attributes, ExpectAttributeValue] = {
     @tailrec
-    def loop(attributes: VectorBuilder[Attribute]): Attributes = {
+    def loop(attributes: VectorBuilder[Attribute]): Either[Attributes, ExpectAttributeValue] = {
       space()
       peekChar() match {
         case Some(c) if isNCNameStart(c) =>
@@ -458,11 +458,15 @@ class XmlPullParser private (
           space()
           accept('=', "XML [25]: '=' character expected")
           space()
-          val delimiter = assert(c => c == '"' || c == '\'', "XML [10]: single or double quote expected around attribute value")
-          val value = readAttributeValue(Some(delimiter), new StringBuilder)
-          loop(attributes += Attribute(name, value))
+          if (partial && peekChar().isEmpty) {
+            Right(ExpectAttributeValue(tname, attributes.result(), name))
+          } else {
+            val delimiter = assert(c => c == '"' || c == '\'', "XML [10]: single or double quote expected around attribute value")
+            val value = readAttributeValue(Some(delimiter), new StringBuilder)
+            loop(attributes += Attribute(name, value))
+          }
         case _ =>
-          attributes.result()
+          Left(attributes.result())
       }
     }
     loop(new VectorBuilder)
@@ -506,52 +510,56 @@ class XmlPullParser private (
   }
 
   private def completeStartTag(name: QName): XmlEvent = {
-    val attributes = readAttributes()
-    space()
-    if (partial && peekChar().isEmpty) {
-      // end of current inputs but partial parse is enabled
-      // emit the appropriate event to feed with custom attributes
-      // before continuing.
-      ExpectAttributes(name, attributes)
-    } else {
-      val isEmpty = peekChar() match {
-        case Some('/') =>
-          nextChar()
-          true
-        case _ =>
-          false
-      }
-      accept('>', "XML [44]: missing closing '>'")
-      val builder = new VectorBuilder[Attribute]
-      @tailrec
-      def adjustNS(attributes: Attributes): Attributes =
-        attributes match {
-          case Seq() => builder.result()
-          case Seq(att, rest @ _*) =>
-            att match {
-              case Attribute(QName(None, "xmlns", _), "") =>
-                // undeclare default namespace
-                namespaces -= ""
-              case Attribute(QName(None, "xmlns", _), v) =>
-                // update default namespace
-                namespaces += ("" -> new URI(v))
-              case Attribute(QName(Some("xmlns"), p, _), "") =>
-                // undeclare namespace
-                namespaces -= p
-              case Attribute(QName(Some("xmlns"), p, _), v) =>
-                // update namespace
-                namespaces += (p -> new URI(v))
-              case Attribute(name, value) =>
-                builder += Attribute(resolveQName(name, false), value)
+    readAttributes(name) match {
+      case Left(attributes) =>
+        space()
+        if (partial && peekChar().isEmpty) {
+          // end of current inputs but partial parse is enabled
+          // emit the appropriate event to feed with custom attributes
+          // before continuing.
+          ExpectAttributes(name, attributes)
+        } else {
+          val isEmpty = peekChar() match {
+            case Some('/') =>
+              nextChar()
+              true
+            case _ =>
+              false
+          }
+          accept('>', "XML [44]: missing closing '>'")
+          val builder = new VectorBuilder[Attribute]
+          @tailrec
+          def adjustNS(attributes: Attributes): Attributes =
+            attributes match {
+              case Seq() => builder.result()
+              case Seq(att, rest @ _*) =>
+                att match {
+                  case Attribute(QName(None, "xmlns", _), "") =>
+                    // undeclare default namespace
+                    namespaces -= ""
+                  case Attribute(QName(None, "xmlns", _), v) =>
+                    // update default namespace
+                    namespaces += ("" -> new URI(v))
+                  case Attribute(QName(Some("xmlns"), p, _), "") =>
+                    // undeclare namespace
+                    namespaces -= p
+                  case Attribute(QName(Some("xmlns"), p, _), v) =>
+                    // update namespace
+                    namespaces += (p -> new URI(v))
+                  case Attribute(name, value) =>
+                    builder += Attribute(resolveQName(name, false), value)
+                }
+                adjustNS(rest)
             }
-            adjustNS(rest)
+
+          val proper = adjustNS(attributes)
+
+          val resolved = resolveQName(name, true)
+
+          StartTag(resolved, proper, isEmpty)
         }
-
-      val proper = adjustNS(attributes)
-
-      val resolved = resolveQName(name, true)
-
-      StartTag(resolved, proper, isEmpty)
+      case Right(evt) =>
+        evt
     }
   }
 
@@ -755,6 +763,8 @@ class XmlPullParser private (
     case EndDocument =>
       throw new NoSuchElementException
     case ExpectAttributes(name, _) =>
+      completeStartTag(name)
+    case ExpectAttributeValue(name, _, _) =>
       completeStartTag(name)
     case ExpectNodes =>
       readContent()
