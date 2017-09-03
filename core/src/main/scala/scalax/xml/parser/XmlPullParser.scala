@@ -178,7 +178,7 @@ class XmlPullParser private (
 
   private def isValid(c: Int): Boolean =
     if (is11)
-      // 	[#x1-#xD7FF] | [#xE000-#xFFFD] | [#x10000-#x10FFFF]
+      // [#x1-#xD7FF] | [#xE000-#xFFFD] | [#x10000-#x10FFFF]
       (0x1 <= c && c <= 0xd7ff) || (0xe000 <= c && c <= 0xfffd) || (0x10000 <= c && c <= 0x10ffff)
     else
       // #x9 | #xA | #xD | [#x20-#xD7FF] | [#xE000-#xFFFD] | [#x10000-#x10FFFF]
@@ -813,10 +813,12 @@ class XmlPullParser private (
       val delimiter = assert(c => c == '"' || c == '\'', "XML [24]: simple or double quote expected")
       accept('1', "XML [26]: expected major version 1")
       accept('.', "XML [26]: expected dot")
-      val minor = untilChar(!_.isDigit, new StringBuilder("1.")).toString
-      if (minor.length == 2)
+      val version = untilChar(!_.isDigit, new StringBuilder("1.")).toString
+      if (version.length == 2)
         fail("XML [26]: expected non empty minor version")
       accept(delimiter, "XML [24]: expected delimiter to close version attribute value")
+
+      is11 = version == "1.1"
 
       val (hasSpace, encoding) = readEncoding(false)
       val standalone = readStandalone(hasSpace)
@@ -824,7 +826,7 @@ class XmlPullParser private (
       (nextChar(): @switch) match {
         case '?' =>
           (nextChar(): @switch) match {
-            case '>' => XmlDecl(minor, encoding, standalone)(l, c)
+            case '>' => XmlDecl(version, encoding, standalone)(l, c)
             case _ =>
               fail("XML [23]: expected end of PI")
           }
