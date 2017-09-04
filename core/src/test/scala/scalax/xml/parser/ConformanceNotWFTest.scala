@@ -33,7 +33,7 @@ class ConformanceNotWFTest extends FlatSpec with Matchers {
         f"not-wf XML document $f" should "be parsed with error" in {
           try {
             val parser = DOMParser.fromFile(f.toJava)
-            an[ParserException] should be thrownBy parser.parse()
+            an[XmlException] should be thrownBy parser.parse()
           } catch {
             case _: java.nio.charset.MalformedInputException =>
               import java.nio.charset.CodingErrorAction
@@ -41,7 +41,7 @@ class ConformanceNotWFTest extends FlatSpec with Matchers {
 
               implicit val codec = Codec("UTF-16")
               val parser = DOMParser.fromFile(f.toJava)
-              an[ParserException] should be thrownBy parser.parse()
+              an[XmlException] should be thrownBy parser.parse()
           }
         }
   }

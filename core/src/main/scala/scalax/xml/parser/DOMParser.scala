@@ -61,8 +61,8 @@ class DOMParser private (validate: Boolean, partial: Boolean, private var parts:
 
   private val partialAttributes = new VectorBuilder[Attribute]
 
-  private def fail(line: Int, column: Int, msg: String) =
-    throw new ParserException(0, 0, msg)
+  private def fail(line: Int, column: Int, error: XmlError, msg: String) =
+    throw XmlException(line, column, error, msg)
 
   /** Parses the input source and returns the parsed document. */
   def parseDocument(): Document = {
@@ -99,13 +99,13 @@ class DOMParser private (validate: Boolean, partial: Boolean, private var parts:
           case (acc, Attribute(QName(None, "xmlns", _), seq)) =>
             val v = stringify(seq)
             if (v.isEmpty)
-              fail(evt.line, evt.column, "[NSC: No Prefix Undeclaring]")
+              fail(evt.line, evt.column, NSCNoPrefixUndeclaring, "default namespace cannot be undeclared")
             else
               acc.updated("", new URI(v))
           case (acc, Attribute(QName(Some("xmlns"), p, _), seq)) =>
             val v = stringify(seq)
             if (v.isEmpty)
-              fail(evt.line, evt.column, "[NSC: No Prefix Undeclaring]")
+              fail(evt.line, evt.column, NSCNoPrefixUndeclaring, f"namespace '$p' cannot be undeclared")
             else
               acc.updated(p, new URI(v))
           case (acc, _) =>
@@ -127,7 +127,7 @@ class DOMParser private (validate: Boolean, partial: Boolean, private var parts:
               case (acc, attr @ Attribute(name, value)) =>
                 val resolved = resolveQName(name, false, evt.line, evt.column)
                 if (acc.contains(resolved))
-                  fail(evt.line, evt.column, f"[uniqattspec]: duplicate attribite with name $name")
+                  fail(evt.line, evt.column, NSCAttributesUnique, f"duplicate attribite with name $name")
                 acc.updated(resolved, stringify(value))
             }
             builder += Elem(resolveQName(sname, true, evt.line, evt.column), attrs, content.result())
@@ -136,7 +136,7 @@ class DOMParser private (validate: Boolean, partial: Boolean, private var parts:
             namespaces = restNamespaces
 
           case (StartTag(sname, attributes, _) :: _, _, _) =>
-            fail(evt.line, evt.column, f"[GIMatch]: expected closing tag '$sname' but got closing tag '$ename'")
+            fail(evt.line, evt.column, WFCElementTypeMatch, f"expected closing tag '$sname' but got closing tag '$ename'")
           case _ =>
             throw new IllegalStateException
         }
@@ -219,10 +219,10 @@ class DOMParser private (validate: Boolean, partial: Boolean, private var parts:
         }
         roots match {
           case Vector(root) => root
-          case _            => fail(1, 1, "XML [1]: several root elements")
+          case _            => fail(1, 1, XmlSyntax("1"), "several root elements")
         }
       case ((evt @ StartTag(name, _, _)) :: _, _) =>
-        fail(evt.line, evt.column, f"XML [39]: unclosed element $name")
+        fail(evt.line, evt.column, XmlSyntax("39"), f"unclosed element $name")
       case _ =>
         throw new IllegalStateException
     }
@@ -267,7 +267,7 @@ class DOMParser private (validate: Boolean, partial: Boolean, private var parts:
           getNS(ns, namespaces) match {
             case Some(uri)                          => QName(Some(ns), n, Some(uri))
             case None if ns.equalsIgnoreCase("xml") => QName(Some(ns), n, Some(xmlNSURI))
-            case None                               => fail(l, c, f"[nsc-NSDeclared]: undeclared namespace $ns")
+            case None                               => fail(l, c, NSCPrefixDeclared, f"undeclared namespace $ns")
           }
       }
     else
@@ -280,13 +280,13 @@ class DOMParser private (validate: Boolean, partial: Boolean, private var parts:
         // TODO read content
         name
       case Some(NEBlackHole) =>
-        fail(l, c, f"[norecursion]: entity $name is recursive")
+        fail(l, c, WFCNoRecursion, f"entity $name is recursive")
       case None =>
         predefEntities.get(name) match {
           case Some(s) =>
             s
           case None =>
-            fail(l, c, f"[wf-entdeclared]: Entitiy $name is not declared")
+            fail(l, c, WFCEntityDeclared, f"entitiy $name is not declared")
         }
     }
 

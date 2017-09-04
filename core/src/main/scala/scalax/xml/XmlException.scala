@@ -14,6 +14,10 @@
 * limitations under the License.
 */
 package scalax.xml
-package parser
 
-class ParserException(line: Int, column: Int, message: String) extends Exception(f"[$line:$column] $message")
+case class XmlException(line: Int, column: Int, error: XmlError, message: String) extends Exception {
+
+  override def getMessage: String =
+    f"{$line.$column]: ${error.name} $message"
+
+}

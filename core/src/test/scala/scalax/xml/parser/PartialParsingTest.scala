@@ -45,7 +45,7 @@ class PartialParsingTest extends FlatSpec with Matchers {
 
   it should "not parse if provided attributes are not of the correct type" in {
     val attrs = 1
-    an[Exception] should be thrownBy xml"<root $attrs/>"
+    an[IllegalArgumentException] should be thrownBy xml"<root $attrs/>"
   }
 
   "an XML document expecting an attribute value" should "be correctly parsed if a non-null value is provided" in {
