@@ -21,6 +21,8 @@ sealed trait XmlEvent {
   val column: Int
 }
 
+sealed trait XmlTexty extends XmlEvent
+
 case object StartDocument extends XmlEvent {
   val line = 1
   val column = 1
@@ -30,7 +32,11 @@ final case class XmlDecl(version: String, encoding: Option[String], standalone: 
 
 final case class StartTag(name: QName, attributes: Attributes, isEmpty: Boolean)(val line: Int, val column: Int) extends XmlEvent
 
-final case class XmlString(s: String, isCDATA: Boolean)(val line: Int, val column: Int) extends XmlEvent
+final case class XmlCharRef(value: Int)(val line: Int, val column: Int) extends XmlTexty
+
+final case class XmlEntitiyRef(name: String)(val line: Int, val column: Int) extends XmlTexty
+
+final case class XmlString(s: String, isCDATA: Boolean)(val line: Int, val column: Int) extends XmlTexty
 
 final case class XmlDoctype(name: String, docname: String, systemid: Option[String])(val line: Int, val column: Int) extends XmlEvent
 

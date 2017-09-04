@@ -30,25 +30,22 @@ import scala.collection.immutable.{
   Queue
 }
 
-import java.net.URI
-
 /** An XML pull parser that accepts some form of partial inputs.
- *  The parser performs qualified name resolution base on current `namespaces`.
+ *  The parser does not perform any qualified name resolution and
+ *  does not track qualified name resolution nor namespaces.
+ *  Namespace declarations are returned as attributes of the declaring element.
+ *  Entities and character references are not processed either.
  */
 class XmlPullParser private (
     private var inputs: Queue[Source],
-    predefEntities: Map[String, String],
-    private var namespaces: NameSpaces,
     var partial: Boolean) extends Iterator[XmlEvent] {
 
-  def this(input: Source, predefEntities: Map[String, String], namespaces: NameSpaces, partial: Boolean) =
-    this(Queue(input), predefEntities, namespaces, partial)
+  def this(input: Source, partial: Boolean) =
+    this(Queue(input), partial)
 
   import XmlPullParser._
 
   private var is11 = false
-
-  private var entities = Map.empty[String, NamedEntityBody]
 
   private var nextEvent: XmlEvent = StartDocument
   private var previousEvent: XmlEvent = null
@@ -233,23 +230,6 @@ class XmlPullParser private (
     }
   }
 
-  private def resolveQName(name: QName, applyDefault: Boolean): QName =
-    name match {
-      case QName(None, _, _) if !applyDefault =>
-        name
-      case QName(None, n, _) =>
-        namespaces.get("") match {
-          case Some(uri) => QName(None, n, Some(uri))
-          case None      => name
-        }
-      case QName(Some(ns), n, _) =>
-        namespaces.get(ns) match {
-          case Some(uri)                          => QName(Some(ns), n, Some(uri))
-          case None if ns.equalsIgnoreCase("xml") => QName(Some(ns), n, Some(xmlNSURI))
-          case None                               => fail(f"[nsc-NSDeclared]: undeclared namespace $ns")
-        }
-    }
-
   private def space(): Unit = {
     @tailrec
     def loop(): Unit =
@@ -415,24 +395,14 @@ class XmlPullParser private (
   }
 
   /** We read '&#' so far */
-  def readCharRef(): Char = {
+  def readCharRef(): Int = {
     def postlude(n: Int) =
       (nextChar(): @switch) match {
         case ';' =>
           if (isValid(n))
-            if (n < 0x10000) {
-              n.toChar
-            } else {
-              // get the surrogate characters
-              val Array(c, cs @ _*) = Character.toChars(n)
-              buffer = cs.foldRight(buffer) { (c, buffer) =>
-                c +: buffer
-              }
-              c
-            }
-          else {
+            n
+          else
             fail("XML [2]: invalid character")
-          }
         case _ =>
           fail("XML [66]: character reference must end with a semicolon")
       }
@@ -483,23 +453,6 @@ class XmlPullParser private (
 
   // ==== middle-level internals
 
-  private def parsedEntitiy(name: String): String =
-    entities.get(name) match {
-      case Some(SourceNamedEntitiy(src)) =>
-        entities = entities.updated(name, NEBlackHole)
-        // TODO read content
-        name
-      case Some(NEBlackHole) =>
-        fail(f"[norecursion]: entity $name is recursive")
-      case None =>
-        predefEntities.get(name) match {
-          case Some(s) =>
-            s
-          case None =>
-            fail(f"[wf-entdeclared]: Entitiy $name is not declared")
-        }
-    }
-
   private def readAttributes(tname: QName, l: Int, c: Int): Either[Attributes, ExpectAttributeValue] = {
     @tailrec
     def loop(attributes: VectorBuilder[Attribute]): Either[Attributes, ExpectAttributeValue] = {
@@ -514,7 +467,7 @@ class XmlPullParser private (
             Right(ExpectAttributeValue(tname, attributes.result(), name)(l, c))
           } else {
             val delimiter = assert(c => c == '"' || c == '\'', "XML [10]: single or double quote expected around attribute value")
-            val value = readAttributeValue(Some(delimiter), new StringBuilder)
+            val value = readAttributeValue(Some(delimiter), new StringBuilder, new VectorBuilder, line, column)
             loop(attributes += Attribute(name, value))
           }
         case _ =>
@@ -525,30 +478,38 @@ class XmlPullParser private (
   }
 
   @tailrec
-  private def readAttributeValue(delim: Option[Char], sb: StringBuilder): String = {
+  private def readAttributeValue(delim: Option[Char], current: StringBuilder, builder: VectorBuilder[XmlTexty], l: Int, c: Int): Seq[XmlTexty] = {
     val delimiters = delim.fold(valueDelimiters)(valueDelimiters + _)
-    untilChar(delimiters.contains(_), sb)
+    untilChar(delimiters.contains(_), current)
     nextCharOpt() match {
-      case `delim` => sb.toString
-      case None    => fail("XML [10]: unexpected end of input")
+      case `delim` =>
+        if (!current.isEmpty)
+          builder += XmlString(current.toString, false)(l, c)
+        builder.result()
+      case None => fail("XML [10]: unexpected end of input")
       case Some('\r') =>
         peekChar() match {
           case Some('\n') =>
-            readAttributeValue(delim, sb.append(nextChar()))
+            readAttributeValue(delim, current.append(nextChar()), builder, l, c)
           case _ =>
-            readAttributeValue(delim, sb.append(' '))
+            readAttributeValue(delim, current.append(' '), builder, l, c)
         }
       case Some(c) if isSpace(c) =>
-        readAttributeValue(delim, sb.append(' '))
+        readAttributeValue(delim, current.append(' '), builder, l, c)
       case Some('&') =>
+        val l = line
+        val c = column
+        builder += XmlString(current.toString, false)(l, c)
         peekChar() match {
           case Some('#') =>
             nextChar()
-            val c = readCharRef()
-            readAttributeValue(delim, sb.append(c))
+            val n = readCharRef()
+            builder += XmlCharRef(n)(l, c)
+            readAttributeValue(delim, new StringBuilder, builder, line, column)
           case _ =>
             val s = readNamedEntity()
-            readAttributeValue(delim, sb.append(s))
+            builder += XmlEntitiyRef(s)(l, c)
+            readAttributeValue(delim, new StringBuilder, builder, line, column)
         }
       case Some(c) =>
         fail(f"XML [10]: Unexpected character '$c'")
@@ -558,7 +519,7 @@ class XmlPullParser private (
   private def readNamedEntity(): String = {
     val name = readNCName()
     accept(';', "XML [68]: named entity must end with a semicolon")
-    parsedEntitiy(name)
+    name
   }
 
   private def completeStartTag(name: QName, l: Int, c: Int): XmlEvent = {
@@ -580,35 +541,8 @@ class XmlPullParser private (
           }
           accept('>', "XML [44]: missing closing '>'")
           val builder = new VectorBuilder[Attribute]
-          @tailrec
-          def adjustNS(attributes: Attributes): Attributes =
-            attributes match {
-              case Seq() => builder.result()
-              case Seq(att, rest @ _*) =>
-                att match {
-                  case Attribute(QName(None, "xmlns", _), "") =>
-                    // undeclare default namespace
-                    namespaces -= ""
-                  case Attribute(QName(None, "xmlns", _), v) =>
-                    // update default namespace
-                    namespaces += ("" -> new URI(v))
-                  case Attribute(QName(Some("xmlns"), p, _), "") =>
-                    // undeclare namespace
-                    namespaces -= p
-                  case Attribute(QName(Some("xmlns"), p, _), v) =>
-                    // update namespace
-                    namespaces += (p -> new URI(v))
-                  case Attribute(name, value) =>
-                    builder += Attribute(resolveQName(name, false), value)
-                }
-                adjustNS(rest)
-            }
 
-          val proper = adjustNS(attributes)
-
-          val resolved = resolveQName(name, true)
-
-          StartTag(resolved, proper, isEmpty)(l, c)
+          StartTag(name, attributes, isEmpty)(l, c)
         }
       case Right(evt) =>
         evt
@@ -695,6 +629,19 @@ class XmlPullParser private (
           case t =>
             fail(f"XML [43]: unexpected token $t")
         }
+      case Some('&') if level > 0 =>
+        val l = line
+        val c = column
+        nextChar()
+        peekChar() match {
+          case Some('#') =>
+            nextChar()
+            val n = readCharRef()
+            XmlCharRef(n)(l, c)
+          case _ =>
+            val v = readNamedEntity()
+            XmlEntitiyRef(v)(l, c)
+        }
       case Some(c) if level == 0 =>
         // at the root level, only space characters are allowed
         if (isSpace(c)) {
@@ -714,18 +661,7 @@ class XmlPullParser private (
     peekChar() match {
       case Some('<') => XmlString(sb.toString, false)(l, c)
       case None      => XmlString(sb.toString, false)(l, c)
-      case Some('&') =>
-        nextChar()
-        peekChar() match {
-          case Some('#') =>
-            nextChar()
-            sb.append(readCharRef())
-            slowPath(sb, l, c)
-          case _ =>
-            val v = readNamedEntity()
-            sb.append(v)
-            slowPath(sb, l, c)
-        }
+      case Some('&') => XmlString(sb.toString, false)(l, c)
       case Some(']') =>
         nextChar()
         peekChar() match {
@@ -958,6 +894,10 @@ class XmlPullParser private (
       readCharData()
     case XmlString(_, _) =>
       readCharData()
+    case XmlCharRef(_) =>
+      readCharData()
+    case XmlEntitiyRef(_) =>
+      readCharData()
     case EndDocument() =>
       throw new NoSuchElementException
     case ExpectAttributes(name, _) =>
@@ -971,8 +911,6 @@ class XmlPullParser private (
 }
 
 private object XmlPullParser {
-
-  val xmlNSURI = new URI("http://www.w3.org/XML/1998/namespace")
 
   val valueDelimiters = " \t\r\n<&"
 

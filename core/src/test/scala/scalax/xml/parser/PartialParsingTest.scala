@@ -20,7 +20,12 @@ import dom._
 
 import org.scalatest._
 
+import scala.language.implicitConversions
+
 class PartialParsingTest extends FlatSpec with Matchers {
+
+  implicit def s2att(s: String): Seq[XmlTexty] =
+    Seq(XmlString(s, false)(0, 0))
 
   "an XML document expecting attributes" should "be correctly parsed if attribute sequence is provided" in {
     val attrs = Seq(Attribute(QName("a"), "value1"), Attribute(QName("b"), "value2"))

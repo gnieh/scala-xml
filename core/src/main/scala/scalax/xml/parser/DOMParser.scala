@@ -18,6 +18,8 @@ package parser
 
 import dom._
 
+import scala.annotation.tailrec
+
 import scala.io.{
   Source,
   Codec
@@ -29,19 +31,25 @@ import scala.reflect.classTag
 
 import java.io.File
 
-class DOMParser private (partial: Boolean, private var parts: Seq[Source], private var args: Seq[Any]) {
+import java.net.URI
+
+class DOMParser private (validate: Boolean, partial: Boolean, private var parts: Seq[Source], private var args: Seq[Any]) {
 
   import DOMParser._
 
   def predefinedEntities: Map[String, String] = predefEntities
 
+  private var entities = Map.empty[String, NamedEntityBody]
+
+  var namespaces = Map.empty[String, URI]
+
   private val parser = parts match {
     case Seq(part) =>
       parts = Nil
-      new XmlPullParser(part, predefinedEntities, Map.empty, false)
+      new XmlPullParser(part, false)
     case Seq(fst, rest @ _*) =>
       parts = rest
-      new XmlPullParser(fst, predefinedEntities, Map.empty, partial)
+      new XmlPullParser(fst, partial)
     case Seq() =>
       throw new IllegalArgumentException("at least one part must be provided")
   }
@@ -65,12 +73,28 @@ class DOMParser private (partial: Boolean, private var parts: Seq[Source], priva
           case (StartTag(sname, attributes, _) :: restStack, content :: (restElements @ builder :: _)) if ename == sname =>
             partialAttributes ++= attributes
             val attrs = partialAttributes.result().foldLeft(Map.empty[QName, String]) {
+              case (acc, Attribute(QName(None, "xmlns", _), seq)) =>
+                val v = stringify(seq)
+                if (v.isEmpty) {
+                  namespaces -= ""
+                } else {
+                  namespaces = namespaces.updated("", new URI(v))
+                }
+                acc
+              case (acc, Attribute(QName(Some("xmlns"), p, _), seq)) =>
+                val v = stringify(seq)
+                if (v.isEmpty) {
+                  namespaces -= p
+                } else {
+                  namespaces = namespaces.updated(p, new URI(v))
+                }
+                acc
               case (acc, attr @ Attribute(name, value)) =>
                 if (acc.contains(name))
                   fail(evt.line, evt.column, f"[uniqattspec]: duplicate attribite with name $name")
-                acc.updated(name, value)
+                acc.updated(resolveQName(name, false, evt.line, evt.column), stringify(value))
             }
-            builder += Elem(sname, attrs, content.result())
+            builder += Elem(resolveQName(sname, true, evt.line, evt.column), attrs, content.result())
             stack = restStack
             elements = restElements
             partialAttributes.clear()
@@ -87,6 +111,26 @@ class DOMParser private (partial: Boolean, private var parts: Seq[Source], priva
               builder += CDATA(text)
             else
               builder += Text(text)
+          case _ =>
+            throw new IllegalStateException
+        }
+      case evt @ XmlCharRef(n) =>
+        elements match {
+          case builder :: _ =>
+            if (validate)
+              builder += Text(stringify(Seq(evt)))
+            else
+              builder += CharRef(n)
+          case _ =>
+            throw new IllegalStateException
+        }
+      case evt @ XmlEntitiyRef(n) =>
+        elements match {
+          case builder :: _ =>
+            if (validate)
+              builder += Text(stringify(Seq(evt)))
+            else
+              builder += EntityRef(n)
           case _ =>
             throw new IllegalStateException
         }
@@ -109,7 +153,7 @@ class DOMParser private (partial: Boolean, private var parts: Seq[Source], priva
             feedNextPart()
           case Seq(arg, rest @ _*) =>
             args = rest
-            partialAttributes += Attribute(name, arg.toString)
+            partialAttributes += Attribute(name, Seq(XmlString(arg.toString, false)(evt.line, evt.column)))
             feedNextPart()
           case _ =>
             throw new IllegalArgumentException
@@ -161,21 +205,77 @@ class DOMParser private (partial: Boolean, private var parts: Seq[Source], priva
         throw new IllegalStateException
     }
 
+  private def resolveQName(name: QName, applyDefault: Boolean, l: Int, c: Int): QName =
+    if (validate)
+      name match {
+        case QName(None, _, _) if !applyDefault =>
+          name
+        case QName(None, n, _) =>
+          namespaces.get("") match {
+            case Some(uri) => QName(None, n, Some(uri))
+            case None      => name
+          }
+        case QName(Some(ns), n, _) =>
+          namespaces.get(ns) match {
+            case Some(uri)                          => QName(Some(ns), n, Some(uri))
+            case None if ns.equalsIgnoreCase("xml") => QName(Some(ns), n, Some(xmlNSURI))
+            case None                               => fail(l, c, f"[nsc-NSDeclared]: undeclared namespace $ns")
+          }
+      }
+    else
+      name
+
+  private def parsedEntitiy(name: String, l: Int, c: Int): String =
+    entities.get(name) match {
+      case Some(SourceNamedEntitiy(src)) =>
+        entities = entities.updated(name, NEBlackHole)
+        // TODO read content
+        name
+      case Some(NEBlackHole) =>
+        fail(l, c, f"[norecursion]: entity $name is recursive")
+      case None =>
+        predefEntities.get(name) match {
+          case Some(s) =>
+            s
+          case None =>
+            fail(l, c, f"[wf-entdeclared]: Entitiy $name is not declared")
+        }
+    }
+
+  private def stringify(seq: Seq[XmlTexty]): String = {
+    val sb = new StringBuilder
+    for (evt <- seq) evt match {
+      case XmlString(s, _) =>
+        sb.append(s)
+      case XmlEntitiyRef(n) =>
+        if (validate)
+          sb.append(parsedEntitiy(n, evt.line, evt.column))
+        else
+          sb.append('&').append(n).append(';')
+      case XmlCharRef(n) =>
+        if (validate)
+          sb.append(Character.toChars(n))
+        else
+          sb.append("&#").append(n.toHexString).append(';')
+    }
+    sb.toString
+  }
+
 }
 
 object DOMParser {
 
   def fromString(str: String): DOMParser =
-    new DOMParser(false, Seq(Source.fromString(str)), Seq.empty)
+    new DOMParser(true, false, Seq(Source.fromString(str)), Seq.empty)
 
   def fromFile(f: String)(implicit codec: Codec): DOMParser =
-    new DOMParser(false, Seq(Source.fromFile(f)), Seq.empty)
+    new DOMParser(true, false, Seq(Source.fromFile(f)), Seq.empty)
 
   def fromFile(f: File)(implicit codec: Codec): DOMParser =
-    new DOMParser(false, Seq(Source.fromFile(f)), Seq.empty)
+    new DOMParser(true, false, Seq(Source.fromFile(f)), Seq.empty)
 
   def fromParts(parts: Seq[Source], args: Seq[Any]): DOMParser =
-    new DOMParser(true, parts, args)
+    new DOMParser(true, true, parts, args)
 
   private[parser] val AttributesTag = classTag[Attributes]
 
@@ -187,5 +287,7 @@ object DOMParser {
     "amp" -> "&",
     "apos" -> "'",
     "quot" -> "\"")
+
+  private[parser] val xmlNSURI = new URI("http://www.w3.org/XML/1998/namespace")
 
 }
