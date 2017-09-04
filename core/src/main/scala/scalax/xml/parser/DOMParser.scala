@@ -41,8 +41,6 @@ class DOMParser private (validate: Boolean, partial: Boolean, private var parts:
 
   private var entities = Map.empty[String, NamedEntityBody]
 
-  var namespaces = Map.empty[String, URI]
-
   private val parser = parts match {
     case Seq(part) =>
       parts = Nil
@@ -54,6 +52,9 @@ class DOMParser private (validate: Boolean, partial: Boolean, private var parts:
       throw new IllegalArgumentException("at least one part must be provided")
   }
 
+  // stack of namespaces used for resolution
+  private var namespaces: List[Map[String, URI]] = Nil
+
   private var stack: List[StartTag] = Nil
 
   private var elements: List[VectorBuilder[XmlNode]] = List(new VectorBuilder)
@@ -63,32 +64,66 @@ class DOMParser private (validate: Boolean, partial: Boolean, private var parts:
   private def fail(line: Int, column: Int, msg: String) =
     throw new ParserException(0, 0, msg)
 
-  def parse(): XmlNode = {
+  /** Parses the input source and returns the parsed document. */
+  def parseDocument(): Document = {
+    // force parsing if not done yet
+    val r = root
+    Document(version, encoding, standalone, r)
+  }
+
+  /** Parses the input source and returns the parsed root element. */
+  def parse(): XmlNode = root
+
+  private var version: Option[String] = None
+
+  private var encoding: Option[String] = None
+
+  private var standalone: Option[Boolean] = None
+
+  private lazy val root = {
     for (evt <- parser) evt match {
-      case evt @ StartTag(_, _, _) =>
-        stack ::= evt
+      case XmlDecl(v, e, s) =>
+        version = Some(v)
+        encoding = e
+        standalone = s
+      case evt @ StartTag(_, attributes, _) =>
+        // finalize attribute list
+        partialAttributes ++= attributes
+        val attrs = partialAttributes.result()
+        // push finalized start tag on the stack
+        stack ::= evt.copy(attributes = attrs)(evt.line, evt.column)
+        // initialize children list
         elements ::= new VectorBuilder
+        // push declared namespaces to resolve children
+        val localNS = attrs.foldLeft(Map.empty[String, URI]) {
+          case (acc, Attribute(QName(None, "xmlns", _), seq)) =>
+            val v = stringify(seq)
+            if (v.isEmpty)
+              fail(evt.line, evt.column, "[NSC: No Prefix Undeclaring]")
+            else
+              acc.updated("", new URI(v))
+          case (acc, Attribute(QName(Some("xmlns"), p, _), seq)) =>
+            val v = stringify(seq)
+            if (v.isEmpty)
+              fail(evt.line, evt.column, "[NSC: No Prefix Undeclaring]")
+            else
+              acc.updated(p, new URI(v))
+          case (acc, _) =>
+            acc
+        }
+        namespaces ::= localNS
+        // reinitialize attribute list builder for next element
+        partialAttributes.clear()
       case EndTag(ename) =>
-        (stack, elements) match {
-          case (StartTag(sname, attributes, _) :: restStack, content :: (restElements @ builder :: _)) if ename == sname =>
-            partialAttributes ++= attributes
-            val attrs = partialAttributes.result().foldLeft(Map.empty[QName, String]) {
-              case (acc, Attribute(QName(None, "xmlns", _), seq)) =>
+        (stack, elements, namespaces) match {
+          case (StartTag(sname, attributes, _) :: restStack, content :: (restElements @ builder :: _), _ :: restNamespaces) if ename == sname =>
+            val attrs = attributes.foldLeft(Map.empty[QName, String]) {
+              case (acc, Attribute(name @ QName(None, "xmlns", _), seq)) =>
                 val v = stringify(seq)
-                if (v.isEmpty) {
-                  namespaces -= ""
-                } else {
-                  namespaces = namespaces.updated("", new URI(v))
-                }
-                acc
-              case (acc, Attribute(QName(Some("xmlns"), p, _), seq)) =>
+                acc.updated(name, v)
+              case (acc, Attribute(name @ QName(Some("xmlns"), p, _), seq)) =>
                 val v = stringify(seq)
-                if (v.isEmpty) {
-                  namespaces -= p
-                } else {
-                  namespaces = namespaces.updated(p, new URI(v))
-                }
-                acc
+                acc.updated(name, v)
               case (acc, attr @ Attribute(name, value)) =>
                 if (acc.contains(name))
                   fail(evt.line, evt.column, f"[uniqattspec]: duplicate attribite with name $name")
@@ -97,9 +132,9 @@ class DOMParser private (validate: Boolean, partial: Boolean, private var parts:
             builder += Elem(resolveQName(sname, true, evt.line, evt.column), attrs, content.result())
             stack = restStack
             elements = restElements
-            partialAttributes.clear()
+            namespaces = restNamespaces
 
-          case (StartTag(sname, attributes, _) :: _, _) =>
+          case (StartTag(sname, attributes, _) :: _, _, _) =>
             fail(evt.line, evt.column, f"[GIMatch]: expected closing tag '$sname' but got closing tag '$ename'")
           case _ =>
             throw new IllegalStateException
@@ -205,18 +240,30 @@ class DOMParser private (validate: Boolean, partial: Boolean, private var parts:
         throw new IllegalStateException
     }
 
+  @tailrec
+  private def getNS(ns: String, namespaces: List[Map[String, URI]]): Option[URI] =
+    namespaces match {
+      case namespace :: namespaces =>
+        namespace.get(ns) match {
+          case None => getNS(ns, namespaces)
+          case uri  => uri
+        }
+      case Nil =>
+        None
+    }
+
   private def resolveQName(name: QName, applyDefault: Boolean, l: Int, c: Int): QName =
     if (validate)
       name match {
         case QName(None, _, _) if !applyDefault =>
           name
         case QName(None, n, _) =>
-          namespaces.get("") match {
+          getNS("", namespaces) match {
             case Some(uri) => QName(None, n, Some(uri))
             case None      => name
           }
         case QName(Some(ns), n, _) =>
-          namespaces.get(ns) match {
+          getNS(ns, namespaces) match {
             case Some(uri)                          => QName(Some(ns), n, Some(uri))
             case None if ns.equalsIgnoreCase("xml") => QName(Some(ns), n, Some(xmlNSURI))
             case None                               => fail(l, c, f"[nsc-NSDeclared]: undeclared namespace $ns")

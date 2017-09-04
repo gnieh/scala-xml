@@ -1,3 +1,5 @@
+# does not respect namespace recommendations
+012.xml
 # tests declaring entities
 115.xml
 089.xml

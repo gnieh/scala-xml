@@ -18,6 +18,12 @@ package dom
 
 sealed trait XmlNode
 
+case class Document(
+    version: Option[String],
+    encoding: Option[String],
+    standalone: Option[Boolean],
+    root: Elem)
+
 case class Elem(name: QName, attributes: Map[QName, String], children: Seq[XmlNode]) extends XmlNode
 
 case class Comment(content: String) extends XmlNode

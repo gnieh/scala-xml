@@ -191,7 +191,7 @@ class XmlPullParser private (
       case LOWERCASE_LETTER |
         UPPERCASE_LETTER | OTHER_LETTER |
         TITLECASE_LETTER | LETTER_NUMBER => true
-      case _ => ":_".contains(c)
+      case _ => "_".contains(c)
     }
   }
 
@@ -203,7 +203,7 @@ class XmlPullParser private (
       case COMBINING_SPACING_MARK |
         ENCLOSING_MARK | NON_SPACING_MARK |
         MODIFIER_LETTER | DECIMAL_DIGIT_NUMBER => true
-      case _ => ".-:·".contains(c)
+      case _ => ".-·".contains(c)
     })
   }
 

@@ -26,12 +26,13 @@ package object xml {
 
   type Attributes = Seq[Attribute]
 
-  type NameSpaces = Map[String, URI]
-
   implicit class XmlInterpolators(val sc: StringContext) extends AnyVal {
 
     def xml(args: Any*): XmlNode =
       DOMParser.fromParts(sc.parts.map(Source.fromString(_)), args).parse()
+
+    def xmldoc(args: Any*): Document =
+      DOMParser.fromParts(sc.parts.map(Source.fromString(_)), args).parseDocument()
 
   }
 
