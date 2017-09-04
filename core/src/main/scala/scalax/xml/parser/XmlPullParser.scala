@@ -305,18 +305,6 @@ class XmlPullParser private (
     CDataToken(l, c)
   }
 
-  /** inside a PI read until final '?>' */
-  @tailrec
-  private def skipPI(): Unit =
-    (nextChar(): @switch) match {
-      case '?' =>
-        (peekChar(): @switch) match {
-          case Some('>') => nextChar()
-          case _         => skipPI()
-        }
-      case _ => skipPI()
-    }
-
   /** We have just read the PI target */
   private def readPIBody(): String = {
     space()
@@ -628,8 +616,9 @@ class XmlPullParser private (
           case StartToken(name, l, c) =>
             completeStartTag(name, l, c)
           case PIToken(target, l, c) if !target.equalsIgnoreCase("xml") =>
-            skipPI()
-            readCharData()
+            val body = readPIBody()
+            position = 3
+            XmlPI(target, body)(l, c)
           case t =>
             fail("43", f"unexpected token $t")
         }
@@ -702,6 +691,8 @@ class XmlPullParser private (
 
   // ==== high-level internals
 
+  private var position = 0
+
   private def scanPrologToken0(): XmlEvent = {
     peekChar() match {
       case Some('<') =>
@@ -709,8 +700,9 @@ class XmlPullParser private (
           case PIToken(name, l, c) if name == "xml" =>
             handleXmlDecl(l, c)
           case PIToken(name, l, c) if !name.equalsIgnoreCase("xml") =>
-            skipPI()
-            scanPrologToken1()
+            val body = readPIBody()
+            position = 0
+            XmlPI(name, body)(l, c)
           case DeclToken(name, l, c) =>
             handleDecl(name, l, c)
           case StartToken(name, l, c) =>
@@ -725,14 +717,14 @@ class XmlPullParser private (
     }
   }
 
-  @tailrec
   private def scanPrologToken1(): XmlEvent = {
     scanMisc() match {
       case None =>
         fail("22", "unexpected end of input")
       case Some(PIToken(name, l, c)) if !name.equalsIgnoreCase("xml") =>
-        skipPI()
-        scanPrologToken1()
+        val body = readPIBody()
+        position = 1
+        XmlPI(name, body)(l, c)
       case Some(DeclToken(name, l, c)) =>
         handleDecl(name, l, c)
       case Some(StartToken(name, l, c)) =>
@@ -866,14 +858,14 @@ class XmlPullParser private (
         fail("22", "expected DOCTYPE declaration")
     }
 
-  @tailrec
   private def scanPrologToken2(): XmlEvent =
     scanMisc() match {
       case None =>
         fail("22", "unexpected end of input")
       case Some(PIToken(name, l, c)) if !name.equalsIgnoreCase("xml") =>
-        skipPI()
-        scanPrologToken2()
+        val body = readPIBody()
+        position = 2
+        XmlPI(name, body)(l, c)
       case Some(StartToken(name, l, c)) =>
         readElement(name, l, c)
       case Some(t) =>
@@ -902,6 +894,15 @@ class XmlPullParser private (
       readCharData()
     case XmlEntitiyRef(_) =>
       readCharData()
+    case XmlPI(_, _) =>
+      if (position == 0)
+        scanPrologToken0()
+      else if (position == 1)
+        scanPrologToken1()
+      else if (position == 2)
+        scanPrologToken2()
+      else
+        readCharData()
     case EndDocument() =>
       throw new NoSuchElementException
     case ExpectAttributes(name, _) =>

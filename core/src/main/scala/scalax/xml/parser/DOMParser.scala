@@ -170,6 +170,14 @@ class DOMParser private (validate: Boolean, partial: Boolean, private var parts:
           case _ =>
             throw new IllegalStateException
         }
+      case XmlPI(target, body) =>
+        elements match {
+          case builder :: _ =>
+            builder += PI(target, body)
+
+          case _ =>
+            throw new IllegalStateException
+        }
       case ExpectAttributes(_, attrs) if partial =>
         partialAttributes ++= attrs
         args match {

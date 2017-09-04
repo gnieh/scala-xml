@@ -35,3 +35,5 @@ case class EntityRef(name: String) extends XmlNode
 case class CharRef(vaue: Int) extends XmlNode
 
 case class CDATA(content: String) extends XmlNode
+
+case class PI(target: String, content: String) extends XmlNode
