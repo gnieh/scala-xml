@@ -40,7 +40,7 @@ final case class XmlString(s: String, isCDATA: Boolean)(val line: Int, val colum
 
 final case class XmlPI(target: String, content: String)(val line: Int, val column: Int) extends XmlEvent
 
-final case class XmlDoctype(name: String, docname: String, systemid: Option[String])(val line: Int, val column: Int) extends XmlEvent
+final case class XmlDoctype(name: String, docname: String, externalid: Option[ExternalId])(val line: Int, val column: Int) extends XmlEvent
 
 final case class EndTag(name: QName)(val line: Int, val column: Int) extends XmlEvent
 

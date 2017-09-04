@@ -233,17 +233,17 @@ class XmlPullParser private (
     }
   }
 
-  private def space(): Unit = {
+  private def space(): Boolean = {
     @tailrec
-    def loop(): Unit =
+    def loop(acc: Boolean): Boolean =
       peekChar() match {
         case Some(c) if isXmlWhitespace(c) =>
           nextChar()
-          loop()
+          loop(true)
         case _ =>
-        // done
+          acc
       }
-    loop()
+    loop(false)
   }
 
   /** Reads the nextChar markup token */
@@ -337,18 +337,30 @@ class XmlPullParser private (
       case _ => skipInternalDTD()
     }
 
-  private def readExternalID(): String = {
-    val sysOrPub = readNCName()
-    assert(isXmlWhitespace(_), "75", "space required after SYSTEM or PUBLIC")
-    sysOrPub match {
-      case "SYSTEM" =>
-        readQuoted(false, "11")
-      case "PUBLIC" =>
-        readQuoted(true, "12")
-        assert(isXmlWhitespace(_), "12", "space required after PubidLiteral")
-        readQuoted(false, "12")
+  private def readExternalID(): Option[ExternalId] = {
+    val s = space()
+    peekChar() match {
+      case Some(c) if isNCNameStart(c) =>
+        if (s) {
+          val sysOrPub = readNCName()
+          assert(isXmlWhitespace(_), "75", "space required after SYSTEM or PUBLIC")
+          space()
+          sysOrPub match {
+            case "SYSTEM" =>
+              Some(SYSTEM(readQuoted(false, "11")))
+            case "PUBLIC" =>
+              val pubid = readQuoted(true, "12")
+              assert(isXmlWhitespace(_), "75", "space required after PubidLiteral")
+              space()
+              Some(PUBLIC(pubid, readQuoted(false, "12")))
+            case _ =>
+              fail("75", "SYSTEM or PUBLIC expected")
+          }
+        } else {
+          fail("28", "space required befor ExternalId")
+        }
       case _ =>
-        fail("75", "SYSTEM or PUBLIC expected")
+        None
     }
   }
 
@@ -837,19 +849,15 @@ class XmlPullParser private (
         assert(isXmlWhitespace(_), "28", "space is expected after DOCTYPE")
         space()
         val docname = readNCName()
-        space()
-        val systemid = peekChar() match {
-          case Some(c) if isNCNameStart(c) => Some(readExternalID())
-          case _                           => None
-        }
+        val externalid = readExternalID()
         space()
         nextChar() match {
           case '>' =>
             // done
-            XmlDoctype(name, docname, systemid)(l, c)
+            XmlDoctype(name, docname, externalid)(l, c)
           case '[' =>
             skipInternalDTD()
-            XmlDoctype(name, docname, systemid)(l, c)
+            XmlDoctype(name, docname, externalid)(l, c)
           case c =>
             fail("28", f"end of doctype or internal DTD expected but got $c")
         }
