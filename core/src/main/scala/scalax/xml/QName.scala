@@ -26,6 +26,22 @@ case class QName(prefix: Option[String], local: String, uri: Option[URI]) {
 
   def isResolved = !prefix.isDefined || uri.isDefined
 
+  override def equals(o: Any): Boolean = o match {
+    case QName(tprefix, tlocal, turi) =>
+      if (isResolved)
+        local == tlocal && uri.map(_.toString) == turi.map(_.toString)
+      else
+        local == tlocal && prefix == tprefix
+    case _ =>
+      false
+  }
+
+  override def hashCode: Int =
+    if (isResolved)
+      (17 + local.hashCode) * 31 + uri.map(_.toString).hashCode
+    else
+      (17 + local.hashCode) * 31 + prefix.hashCode
+
 }
 
 object QName {

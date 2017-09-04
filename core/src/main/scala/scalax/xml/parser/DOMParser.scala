@@ -125,9 +125,10 @@ class DOMParser private (validate: Boolean, partial: Boolean, private var parts:
                 val v = stringify(seq)
                 acc.updated(name, v)
               case (acc, attr @ Attribute(name, value)) =>
-                if (acc.contains(name))
+                val resolved = resolveQName(name, false, evt.line, evt.column)
+                if (acc.contains(resolved))
                   fail(evt.line, evt.column, f"[uniqattspec]: duplicate attribite with name $name")
-                acc.updated(resolveQName(name, false, evt.line, evt.column), stringify(value))
+                acc.updated(resolved, stringify(value))
             }
             builder += Elem(resolveQName(sname, true, evt.line, evt.column), attrs, content.result())
             stack = restStack

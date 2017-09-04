@@ -35,6 +35,8 @@ import scala.collection.immutable.{
  *  does not track qualified name resolution nor namespaces.
  *  Namespace declarations are returned as attributes of the declaring element.
  *  Entities and character references are not processed either.
+ *
+ *  This parser implements the XML Namespaces recommendation (see https://www.w3.org/TR/xml-names/).
  */
 class XmlPullParser private (
     private var inputs: Queue[Source],
