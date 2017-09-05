@@ -14,7 +14,7 @@
 * limitations under the License.
 */
 package scalax.xml
-package pull
+package parser
 
 sealed trait XmlEvent {
   val line: Int
@@ -40,7 +40,7 @@ final case class XmlString(s: String, isCDATA: Boolean)(val line: Int, val colum
 
 final case class XmlPI(target: String, content: String)(val line: Int, val column: Int) extends XmlEvent
 
-final case class XmlDoctype(name: String, docname: String, externalid: Option[ExternalId])(val line: Int, val column: Int) extends XmlEvent
+final case class XmlDoctype(name: String, docname: String, externalid: Option[ExternalId], dtd: Option[String])(val line: Int, val column: Int) extends XmlEvent
 
 final case class EndTag(name: QName)(val line: Int, val column: Int) extends XmlEvent
 

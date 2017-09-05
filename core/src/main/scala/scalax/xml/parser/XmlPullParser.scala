@@ -14,7 +14,7 @@
 * limitations under the License.
 */
 package scalax.xml
-package pull
+package parser
 
 import scala.io.Source
 
@@ -37,8 +37,8 @@ import scala.collection.immutable.{
  *  This parser implements the XML Namespaces recommendation (see https://www.w3.org/TR/xml-names/).
  */
 class XmlPullParser private (
-    private var inputs: Queue[Source],
-    var partial: Boolean) extends Iterator[XmlEvent] with AutoCloseable {
+    inputs: Queue[Source],
+    var partial: Boolean) extends ParserBase(inputs, false) with Iterator[XmlEvent] with AutoCloseable {
 
   def this(input: Source, partial: Boolean) =
     this(Queue(input), partial)
@@ -46,8 +46,6 @@ class XmlPullParser private (
   import XmlUtils._
 
   import XmlPullParser._
-
-  private var is11 = false
 
   private var nextEvent: XmlEvent = StartDocument
   private var previousEvent: XmlEvent = null
@@ -76,116 +74,9 @@ class XmlPullParser private (
       previousEvent
   }
 
-  /** Feeds this parser with more content from the given source. */
-  def feed(src: Source): Unit =
-    inputs = inputs.enqueue(src)
-
   // ==== low-level internals
 
-  private def currentInput = inputs.headOption
-
-  private def line = currentInput.fold(0)(_.RelaxedPositioner.cline)
-
-  private def column = currentInput.fold(0)(_.RelaxedPositioner.ccol)
-
   private var level = 0
-
-  private def fail(prod: String, msg: String): Nothing =
-    fail(XmlSyntax(prod), msg)
-
-  private def fail(error: XmlError, msg: String): Nothing =
-    throw XmlException(new LineColumnPosition(line, column), error, msg)
-
-  def close(): Unit =
-    inputs.foreach(_.close())
-
-  private var buffer = Queue.empty[Char]
-
-  @tailrec
-  private def readInput(): Unit =
-    inputs.dequeueOption match {
-      case Some((input, rest)) =>
-        if (input.hasNext) {
-          val c = input.next()
-          if (isValid(c))
-            buffer = buffer.enqueue(c)
-          else
-            fail("2", "forbidden character")
-        } else {
-          input.close()
-          inputs = rest
-          readInput()
-        }
-      case None =>
-        buffer = Queue.empty[Char]
-    }
-
-  private def peekChar(): Option[Char] =
-    buffer.headOption.orElse {
-      readInput()
-      buffer.headOption
-    }
-
-  private def nextCharOpt(): Option[Char] = {
-    val c = peekChar()
-    if (buffer.nonEmpty)
-      buffer = buffer.tail
-    c
-  }
-
-  /** Consumes the next character in source and returns it. */
-  private def nextChar(): Char =
-    nextCharOpt().getOrElse(fail("1", "Unexpected end of input"))
-
-  private def accept(c: Char, error: String, msg: String): Unit = peekChar() match {
-    case Some(n) if n == c =>
-      nextChar()
-    case _ =>
-      fail(error, msg)
-  }
-
-  private def assert(p: Char => Boolean, error: String, msg: String): Char = peekChar() match {
-    case Some(c) if p(c) =>
-      nextChar()
-    case _ =>
-      fail(error, msg)
-  }
-
-  private def untilChar(p: Char => Boolean, sb: StringBuilder): StringBuilder = {
-    @tailrec
-    def loop(sb: StringBuilder): StringBuilder =
-      peekChar() match {
-        case Some(c) if !p(c) =>
-          nextChar()
-          loop(sb.append(c))
-        case _ =>
-          sb
-      }
-    loop(sb)
-  }
-
-  private def read(s: String): Int = {
-    @tailrec
-    def loop(idx: Int, acc: Int): Int =
-      if (idx >= s.length)
-        acc
-      else peekChar() match {
-        case Some(c) if c == s.charAt(idx) =>
-          nextChar()
-          loop(idx + 1, acc + 1)
-        case _ =>
-          acc
-      }
-    loop(0, 0)
-  }
-
-  private def isValid(c: Int): Boolean =
-    if (is11)
-      // [#x1-#xD7FF] | [#xE000-#xFFFD] | [#x10000-#x10FFFF]
-      (0x1 <= c && c <= 0xd7ff) || (0xe000 <= c && c <= 0xfffd) || (0x10000 <= c && c <= 0x10ffff)
-    else
-      // #x9 | #xA | #xD | [#x20-#xD7FF] | [#xE000-#xFFFD] | [#x10000-#x10FFFF]
-      c == 0x9 || c == 0xa || c == 0xd || (0x20 <= c && c <= 0xd7ff) || (0xe000 <= c && c <= 0xfffd) || (0x10000 <= c && c <= 0x10ffff)
 
   private def isNCNameStart(c: Char): Boolean = {
     import java.lang.Character._
@@ -233,19 +124,6 @@ class XmlPullParser private (
     }
   }
 
-  private def space(): Boolean = {
-    @tailrec
-    def loop(acc: Boolean): Boolean =
-      peekChar() match {
-        case Some(c) if isXmlWhitespace(c) =>
-          nextChar()
-          loop(true)
-        case _ =>
-          acc
-      }
-    loop(false)
-  }
-
   /** Reads the nextChar markup token */
   private def readMarkupToken(): MarkupToken = {
     accept('<', "43", "expected token start")
@@ -278,24 +156,6 @@ class XmlPullParser private (
     }
   }
 
-  /** We have read '<!-' so far */
-  private def skipComment(l: Int, c: Int): CommentToken = {
-    accept('-', "15", "second dash missing to open comment")
-    def loop(): Unit = (nextChar(): @switch) match {
-      case '-' =>
-        (nextChar(): @switch) match {
-          case '-' =>
-            accept('>', "15", "'--' is not inside comments")
-          case _ =>
-            loop()
-        }
-      case _ =>
-        loop()
-    }
-    loop()
-    CommentToken(l, c)
-  }
-
   /** We have read '<![' so far */
   private def readCDATA(l: Int, c: Int): CDataToken = {
     val n = read("CDATA[")
@@ -325,16 +185,19 @@ class XmlPullParser private (
     loop(new StringBuilder)
   }
 
-  /** We read the beginning of internal DTD subset, read until final ']>' */
+  /** We read the beginning of internal DTD subset, read until final ']>' (included) */
   @tailrec
-  private def skipInternalDTD(): Unit =
+  private def rawInternalDTD(mayEnd: Boolean, sb: StringBuilder): String =
     (nextChar(): @switch) match {
       case ']' =>
         (nextChar(): @switch) match {
-          case '>' => // done
-          case _   => skipInternalDTD()
+          case '>' => sb.append('>').toString
+          case c   => rawInternalDTD(isXmlWhitespace(c), sb.append(']').append(c))
         }
-      case _ => skipInternalDTD()
+      case '>' if mayEnd =>
+        sb.append('>').toString
+      case c =>
+        rawInternalDTD(mayEnd && isXmlWhitespace(c), sb.append(c))
     }
 
   private def readExternalID(): Option[ExternalId] = {
@@ -854,12 +717,12 @@ class XmlPullParser private (
         nextChar() match {
           case '>' =>
             // done
-            XmlDoctype(name, docname, externalid)(l, c)
+            XmlDoctype(name, docname, externalid, None)(l, c)
           case '[' =>
-            skipInternalDTD()
-            XmlDoctype(name, docname, externalid)(l, c)
+            val dtd = rawInternalDTD(false, new StringBuilder)
+            XmlDoctype(name, docname, externalid, Some(dtd))(l, c)
           case c =>
-            fail("28", f"end of doctype or internal DTD expected but got $c")
+            fail("28", "expected end of doctype or internal DTD")
         }
       case _ =>
         fail("22", "expected DOCTYPE declaration")
@@ -895,7 +758,7 @@ class XmlPullParser private (
       scanPrologToken0()
     case XmlDecl(_, _, _) =>
       scanPrologToken1()
-    case XmlDoctype(_, _, _) =>
+    case XmlDoctype(_, _, _, _) =>
       scanPrologToken2()
     case StartTag(name, _, true) =>
       level += 1

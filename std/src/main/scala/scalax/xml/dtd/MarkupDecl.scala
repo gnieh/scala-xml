@@ -87,3 +87,23 @@ case object REQUIRED extends AttDefault
 case object IMPLIED extends AttDefault
 
 final case class FIXED(value: String) extends AttDefault
+
+sealed trait EntityDecl extends MarkupDecl
+
+final case class GEDecl(name: String, definition: EntityDef) extends EntityDecl
+
+final case class PEDecl(name: String, definition: PEDef) extends EntityDecl
+
+sealed trait EntityDef
+
+sealed trait PEDef
+
+final case class EntityValue(value: String) extends EntityDef with PEDef
+
+final case class ExternalEntityDef(externalid: ExternalId, notation: Option[String]) extends EntityDef
+
+final case class ExternalPEDef(externalid: ExternalId) extends PEDef
+
+final case class NotationDecl(name: String, id: Either[ExternalId, PublicId]) extends MarkupDecl
+
+final case class PublicId(id: String)

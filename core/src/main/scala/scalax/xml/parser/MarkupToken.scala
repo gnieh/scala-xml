@@ -14,23 +14,23 @@
 * limitations under the License.
 */
 package scalax.xml
-package pull
+package parser
 
-private sealed trait MarkupToken {
+sealed trait MarkupToken {
   val line: Int
   val column: Int
 }
 
-private case class StartToken(name: QName, line: Int, column: Int) extends MarkupToken
+case class StartToken(name: QName, line: Int, column: Int) extends MarkupToken
 
-private case class EndToken(name: QName, line: Int, column: Int) extends MarkupToken
+case class EndToken(name: QName, line: Int, column: Int) extends MarkupToken
 
-private case class PIToken(name: String, line: Int, column: Int) extends MarkupToken
+case class PIToken(name: String, line: Int, column: Int) extends MarkupToken
 
-private case class DeclToken(name: String, line: Int, column: Int) extends MarkupToken
+case class DeclToken(name: String, line: Int, column: Int) extends MarkupToken
 
-private case class CommentToken(line: Int, column: Int) extends MarkupToken
+case class CommentToken(line: Int, column: Int) extends MarkupToken
 
-private case class CDataToken(line: Int, column: Int) extends MarkupToken
+case class CDataToken(line: Int, column: Int) extends MarkupToken
 
-private case class EntityRefToken(name: String, line: Int, column: Int) extends MarkupToken
+case class EntityRefToken(name: String, line: Int, column: Int) extends MarkupToken

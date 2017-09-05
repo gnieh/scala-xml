@@ -13,8 +13,10 @@
 * See the License for the specific language governing permissions and
 * limitations under the License.
 */
-package scalax.xml.pull
+package scalax.xml
 
-sealed trait ElementContentModel
-case object EmptyElement extends ElementContentModel
-case object AnyElement extends ElementContentModel
+sealed trait ExternalId
+
+final case class SYSTEM(system: String) extends ExternalId
+
+final case class PUBLIC(pubid: String, system: String) extends ExternalId

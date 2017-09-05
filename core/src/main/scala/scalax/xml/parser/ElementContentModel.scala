@@ -13,10 +13,8 @@
 * See the License for the specific language governing permissions and
 * limitations under the License.
 */
-package scalax.xml.pull
+package scalax.xml.parser
 
-import scala.io.Source
-
-sealed trait NamedEntityBody
-case class SourceNamedEntitiy(src: Source) extends NamedEntityBody
-case object NEBlackHole extends NamedEntityBody
+sealed trait ElementContentModel
+case object EmptyElement extends ElementContentModel
+case object AnyElement extends ElementContentModel

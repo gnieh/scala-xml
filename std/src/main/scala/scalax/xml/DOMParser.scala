@@ -15,7 +15,7 @@
 */
 package scalax.xml
 
-import pull._
+import parser._
 import tree._
 
 import scala.annotation.tailrec

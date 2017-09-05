@@ -17,7 +17,7 @@ package scalax.xml
 package parser
 
 import tree._
-import pull._
+import parser._
 
 import org.scalatest._
 

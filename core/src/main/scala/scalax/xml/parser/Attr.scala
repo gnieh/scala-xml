@@ -14,6 +14,6 @@
 * limitations under the License.
 */
 package scalax.xml
-package pull
+package parser
 
 case class Attr(name: QName, value: Seq[XmlTexty])
