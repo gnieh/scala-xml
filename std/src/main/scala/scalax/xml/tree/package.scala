@@ -15,9 +15,8 @@
 */
 package scalax.xml
 
-case class XmlException(position: Position, error: XmlError, message: String) extends Exception {
+package object tree {
 
-  override def getMessage: String =
-    f"$position: ${error.name} $message"
+  type BreadCrumbs[A] = Seq[Crumb[A]]
 
 }

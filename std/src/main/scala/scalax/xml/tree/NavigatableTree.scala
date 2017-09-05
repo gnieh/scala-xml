@@ -13,10 +13,17 @@
 * See the License for the specific language governing permissions and
 * limitations under the License.
 */
-package scalax.xml.parser
+package scalax.xml
+package tree
 
-import scala.io.Source
+trait NavigatableTree[T] {
 
-private sealed trait NamedEntityBody
-private case class SourceNamedEntitiy(src: Source) extends NamedEntityBody
-private case object NEBlackHole extends NamedEntityBody
+  def moveUp(t: T): Option[T]
+
+  def moveDown(t: T): Option[T]
+
+  def moveLeft(t: T): Option[T]
+
+  def moveRight(t: T): Option[T]
+
+}

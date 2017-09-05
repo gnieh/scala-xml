@@ -14,10 +14,20 @@
 * limitations under the License.
 */
 package scalax.xml
+package processor
 
-case class XmlException(position: Position, error: XmlError, message: String) extends Exception {
+import tree._
 
-  override def getMessage: String =
-    f"$position: ${error.name} $message"
+/** A [[Transformer]] with no state. */
+abstract class Mapper[In, Out] extends Transformer[Unit, In, Out] {
+
+  def map(n: Tree[In]): Out
+
+  def transform(t: Tree[In]): Tree[Out] =
+    transform((), t)
+
+  protected final def updateState(u: Unit, n: Tree[In]) = ()
+
+  protected final def transformNode(u: Unit, n: Tree[In]) = map(n)
 
 }

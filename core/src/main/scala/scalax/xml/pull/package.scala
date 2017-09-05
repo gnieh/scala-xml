@@ -15,9 +15,6 @@
 */
 package scalax.xml
 
-case class XmlException(position: Position, error: XmlError, message: String) extends Exception {
-
-  override def getMessage: String =
-    f"$position: ${error.name} $message"
+package object pull {
 
 }

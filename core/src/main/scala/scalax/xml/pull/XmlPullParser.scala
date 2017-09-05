@@ -14,7 +14,7 @@
 * limitations under the License.
 */
 package scalax.xml
-package parser
+package pull
 
 import scala.io.Source
 
@@ -42,6 +42,8 @@ class XmlPullParser private (
 
   def this(input: Source, partial: Boolean) =
     this(Queue(input), partial)
+
+  import XmlUtils._
 
   import XmlPullParser._
 
@@ -92,7 +94,7 @@ class XmlPullParser private (
     fail(XmlSyntax(prod), msg)
 
   private def fail(error: XmlError, msg: String): Nothing =
-    throw XmlException(line, column, error, msg)
+    throw XmlException(new LineColumnPosition(line, column), error, msg)
 
   def close(): Unit =
     inputs.foreach(_.close())
@@ -185,9 +187,6 @@ class XmlPullParser private (
       // #x9 | #xA | #xD | [#x20-#xD7FF] | [#xE000-#xFFFD] | [#x10000-#x10FFFF]
       c == 0x9 || c == 0xa || c == 0xd || (0x20 <= c && c <= 0xd7ff) || (0xe000 <= c && c <= 0xfffd) || (0x10000 <= c && c <= 0x10ffff)
 
-  private def isSpace(c: Char): Boolean =
-    c == ' ' || c == '\t' || c == '\r' || c == '\n'
-
   private def isNCNameStart(c: Char): Boolean = {
     import java.lang.Character._
 
@@ -238,7 +237,7 @@ class XmlPullParser private (
     @tailrec
     def loop(): Unit =
       peekChar() match {
-        case Some(c) if isSpace(c) =>
+        case Some(c) if isXmlWhitespace(c) =>
           nextChar()
           loop()
         case _ =>
@@ -340,13 +339,13 @@ class XmlPullParser private (
 
   private def readExternalID(): String = {
     val sysOrPub = readNCName()
-    assert(isSpace(_), "75", "space required after SYSTEM or PUBLIC")
+    assert(isXmlWhitespace(_), "75", "space required after SYSTEM or PUBLIC")
     sysOrPub match {
       case "SYSTEM" =>
         readQuoted(false, "11")
       case "PUBLIC" =>
         readQuoted(true, "12")
-        assert(isSpace(_), "12", "space required after PubidLiteral")
+        assert(isXmlWhitespace(_), "12", "space required after PubidLiteral")
         readQuoted(false, "12")
       case _ =>
         fail("75", "SYSTEM or PUBLIC expected")
@@ -445,9 +444,9 @@ class XmlPullParser private (
 
   // ==== middle-level internals
 
-  private def readAttributes(tname: QName, l: Int, c: Int): Either[Attributes, ExpectAttributeValue] = {
+  private def readAttributes(tname: QName, l: Int, c: Int): Either[Seq[Attr], ExpectAttributeValue] = {
     @tailrec
-    def loop(attributes: VectorBuilder[Attribute]): Either[Attributes, ExpectAttributeValue] = {
+    def loop(attributes: VectorBuilder[Attr]): Either[Seq[Attr], ExpectAttributeValue] = {
       space()
       peekChar() match {
         case Some(c) if isNCNameStart(c) =>
@@ -460,7 +459,7 @@ class XmlPullParser private (
           } else {
             val delimiter = assert(c => c == '"' || c == '\'', "10", "single or double quote expected around attribute value")
             val value = readAttributeValue(Some(delimiter), new StringBuilder, new VectorBuilder, line, column)
-            loop(attributes += Attribute(name, value))
+            loop(attributes += Attr(name, value))
           }
         case _ =>
           Left(attributes.result())
@@ -486,7 +485,7 @@ class XmlPullParser private (
           case _ =>
             readAttributeValue(delim, current.append(' '), builder, l, c)
         }
-      case Some(c) if isSpace(c) =>
+      case Some(c) if isXmlWhitespace(c) =>
         readAttributeValue(delim, current.append(' '), builder, l, c)
       case Some('&') =>
         val l = line
@@ -532,7 +531,7 @@ class XmlPullParser private (
               false
           }
           accept('>', "44", "missing closing '>'")
-          val builder = new VectorBuilder[Attribute]
+          val builder = new VectorBuilder[Attr]
 
           StartTag(name, attributes, isEmpty)(l, c)
         }
@@ -637,7 +636,7 @@ class XmlPullParser private (
         }
       case Some(c) if level == 0 =>
         // at the root level, only space characters are allowed
-        if (isSpace(c)) {
+        if (isXmlWhitespace(c)) {
           space()
           readCharData()
         } else {
@@ -735,7 +734,7 @@ class XmlPullParser private (
   }
 
   private def handleXmlDecl(l: Int, c: Int): XmlEvent = {
-    assert(isSpace(_), "24", "space is expected after xml")
+    assert(isXmlWhitespace(_), "24", "space is expected after xml")
     space()
     val n = read("version")
     if (n == 7) {
@@ -773,7 +772,7 @@ class XmlPullParser private (
   @tailrec
   private def readEncoding(hasSpace: Boolean): (Boolean, Option[String]) =
     peekChar() match {
-      case Some(c) if isSpace(c) =>
+      case Some(c) if isXmlWhitespace(c) =>
         space()
         readEncoding(true)
       case Some('e') =>
@@ -799,7 +798,7 @@ class XmlPullParser private (
   @tailrec
   private def readStandalone(hasSpace: Boolean): Option[Boolean] =
     peekChar() match {
-      case Some(c) if isSpace(c) =>
+      case Some(c) if isXmlWhitespace(c) =>
         space()
         readStandalone(true)
       case Some('s') =>
@@ -835,7 +834,7 @@ class XmlPullParser private (
   private def handleDecl(name: String, l: Int, c: Int): XmlEvent =
     name match {
       case "DOCTYPE" =>
-        assert(isSpace(_), "28", "space is expected after DOCTYPE")
+        assert(isXmlWhitespace(_), "28", "space is expected after DOCTYPE")
         space()
         val docname = readNCName()
         space()
@@ -872,6 +871,17 @@ class XmlPullParser private (
         fail("22", f"unexpected markup $t")
     }
 
+  private def scanPostlog(): XmlEvent =
+    scanMisc() match {
+      case None => EndDocument()(line, column)
+      case Some(PIToken(name, l, c)) if !name.equalsIgnoreCase("xml") =>
+        val body = readPIBody()
+        position = 4
+        XmlPI(name, body)(l, c)
+      case Some(t) =>
+        fail("1", f"unexpected markup $t after root element")
+    }
+
   private def scan(): XmlEvent = previousEvent match {
     case StartDocument =>
       scanPrologToken0()
@@ -887,7 +897,10 @@ class XmlPullParser private (
       readContent()
     case EndTag(_) =>
       level -= 1
-      readCharData()
+      if (level > 0)
+        readCharData()
+      else
+        scanPostlog()
     case XmlString(_, _) =>
       readCharData()
     case XmlCharRef(_) =>
@@ -901,8 +914,10 @@ class XmlPullParser private (
         scanPrologToken1()
       else if (position == 2)
         scanPrologToken2()
-      else
+      else if (position == 3)
         readCharData()
+      else
+        scanPostlog()
     case EndDocument() =>
       throw new NoSuchElementException
     case ExpectAttributes(name, _) =>

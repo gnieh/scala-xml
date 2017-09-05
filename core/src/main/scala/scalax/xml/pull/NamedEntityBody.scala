@@ -13,11 +13,10 @@
 * See the License for the specific language governing permissions and
 * limitations under the License.
 */
-package scalax.xml
+package scalax.xml.pull
 
-case class XmlException(position: Position, error: XmlError, message: String) extends Exception {
+import scala.io.Source
 
-  override def getMessage: String =
-    f"$position: ${error.name} $message"
-
-}
+sealed trait NamedEntityBody
+case class SourceNamedEntitiy(src: Source) extends NamedEntityBody
+case object NEBlackHole extends NamedEntityBody

@@ -14,10 +14,6 @@
 * limitations under the License.
 */
 package scalax.xml
+package tree
 
-case class XmlException(position: Position, error: XmlError, message: String) extends Exception {
-
-  override def getMessage: String =
-    f"$position: ${error.name} $message"
-
-}
+final case class Crumb[A](left: Seq[Tree[A]], n: Tree[A], right: Seq[Tree[A]])

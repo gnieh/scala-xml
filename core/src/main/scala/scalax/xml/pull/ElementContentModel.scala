@@ -13,7 +13,7 @@
 * See the License for the specific language governing permissions and
 * limitations under the License.
 */
-package scalax.xml.parser
+package scalax.xml.pull
 
 sealed trait ElementContentModel
 case object EmptyElement extends ElementContentModel

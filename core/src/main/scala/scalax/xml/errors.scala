@@ -15,9 +15,12 @@
 */
 package scalax.xml
 
-case class XmlException(position: Position, error: XmlError, message: String) extends Exception {
+/** All errors encountered in processing an Xml documents
+ *  have a kind.
+ *  These errors are unique code defined in the various normative documents
+ *  and recommendations.
+ */
+abstract class XmlError(val name: String)
 
-  override def getMessage: String =
-    f"$position: ${error.name} $message"
-
-}
+/** Represents a syntax error according to an XML production rule. */
+case class XmlSyntax(id: String) extends XmlError(f"XML [$id]")

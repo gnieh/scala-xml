@@ -15,9 +15,9 @@
 */
 package scalax.xml
 
-case class XmlException(position: Position, error: XmlError, message: String) extends Exception {
+object XmlUtils {
 
-  override def getMessage: String =
-    f"$position: ${error.name} $message"
+  def isXmlWhitespace(c: Char): Boolean =
+    c == ' ' || c == '\t' || c == '\r' || c == '\n'
 
 }
