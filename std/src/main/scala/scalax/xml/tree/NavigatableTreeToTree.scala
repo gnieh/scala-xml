@@ -14,10 +14,12 @@
 * limitations under the License.
 */
 package scalax.xml
+package tree
 
-case class XmlException(position: Position, error: XmlError, message: String) extends Exception {
+trait NavigatableTreeToTree[T] {
 
-  override def getMessage: String =
-    f"$position: ${error.name} $message"
+  def fromTree(t: T): NavigatableTree[T]
+
+  def toTree(nt: NavigatableTree[T]): T
 
 }

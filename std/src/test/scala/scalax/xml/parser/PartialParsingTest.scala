@@ -16,7 +16,8 @@
 package scalax.xml
 package parser
 
-import dom._
+import tree._
+import pull._
 
 import org.scalatest._
 
@@ -27,18 +28,22 @@ class PartialParsingTest extends FlatSpec with Matchers {
   implicit def s2att(s: String): Seq[XmlTexty] =
     Seq(XmlString(s, false)(0, 0))
 
+  implicit def nv2att(nv: (QName, String)): XmlTree =
+    Tree(Attribute(nv._1), Seq(Tree(Text(nv._2))))
+
   "an XML document expecting attributes" should "be correctly parsed if attribute sequence is provided" in {
-    val attrs = Seq(Attribute(QName("a"), "value1"), Attribute(QName("b"), "value2"))
+    val attrs = Seq(Attr(QName("a"), "value1"), Attr(QName("b"), "value2"))
     val parsed = xml"<root $attrs/>"
-    val expected = Elem(QName("root"), Map(QName("a") -> "value1", QName("b") -> "value2"), Seq.empty)
+    val expected = Tree(Elem(QName("root"), Seq(QName("a") -> "value1", QName("b") -> "value2")), Seq.empty)
 
     parsed should be(expected)
   }
 
   it should "add provided attributes to the parsed ones" in {
-    val attrs = Seq(Attribute(QName("a"), "value1"), Attribute(QName("b"), "value2"))
+    val attrs = Seq(Attr(QName("a"), "value1"), Attr(QName("b"), "value2"))
     val parsed = xml"""<root c="value3" $attrs d="value4"/>"""
-    val expected = Elem(QName("root"), Map(QName("a") -> "value1", QName("b") -> "value2", QName("c") -> "value3", QName("d") -> "value4"), Seq.empty)
+    val expected =
+      Tree(Elem(QName("root"), Seq(QName("c") -> "value3", QName("a") -> "value1", QName("b") -> "value2", QName("d") -> "value4")), Seq.empty)
 
     parsed should be(expected)
   }
@@ -52,7 +57,8 @@ class PartialParsingTest extends FlatSpec with Matchers {
     val attrValue1 = 1
     val attrValue2 = "v"
     val parsed = xml"""<root a="0" b=$attrValue1 c='2' d=$attrValue2 e="3"/>"""
-    val expected = Elem(QName("root"), Map(QName("a") -> "0", QName("b") -> "1", QName("c") -> "2", QName("d") -> "v", QName("e") -> "3"), Seq.empty)
+    val expected =
+      Tree(Elem(QName("root"), Seq(QName("a") -> "0", QName("b") -> "1", QName("c") -> "2", QName("d") -> "v", QName("e") -> "3")), Seq.empty)
 
     parsed should be(expected)
   }
@@ -60,25 +66,29 @@ class PartialParsingTest extends FlatSpec with Matchers {
   it should "drop the attribute if provided value is null" in {
     val value = null
     val parsed = xml"<root a=$value/>"
-    val expected = Elem(QName("root"), Map.empty, Seq.empty)
+    val expected = Tree(Elem(QName("root"), Seq.empty), Seq.empty)
 
     parsed should be(expected)
   }
 
   "an XML document expecting nodes" should "be correctly parsed a sequence of nodes is provided" in {
-    val comment = Comment("a comment")
-    val elem = Elem(QName("sub"), Map.empty, Seq.empty)
-    val text = Text("text")
+    val comment = Tree(Comment("a comment"))
+    val elem = Tree(Elem(QName("sub"), Seq.empty))
+    val text = Tree(Text("text"))
     val nodes = Seq(comment, elem, text)
     val parsed = xml"""<root><!-- let’s try to include nodes --><![CDATA[Some data]]>$nodes<sub>Another sub</sub></root>"""
-    val expected =
-      Elem(QName("root"), Map.empty, Seq(
-        CDATA("Some data"),
-        comment,
-        elem,
-        text,
-        Elem(QName("sub"), Map.empty, Seq(
-          Text("Another sub")))))
+    val expected: XmlTree =
+      Tree(
+        Elem(QName("root"), Seq.empty),
+        Seq(
+          Tree(CDATA("Some data")),
+          comment,
+          elem,
+          text,
+          Tree(
+            Elem(QName("sub"), Seq.empty),
+            Seq(
+              Tree(Text("Another sub"))))))
 
     parsed should be(expected)
   }

@@ -14,10 +14,14 @@
 * limitations under the License.
 */
 package scalax.xml
+package processor
 
-case class XmlException(position: Position, error: XmlError, message: String) extends Exception {
+import tree._
 
-  override def getMessage: String =
-    f"$position: ${error.name} $message"
+trait Folder[In, Out] {
+
+  protected def doNode(acc: Out, n: In): Out
+
+  def process(init: Out, t: Tree[In]): Out
 
 }

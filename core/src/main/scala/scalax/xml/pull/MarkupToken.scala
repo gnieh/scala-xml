@@ -14,7 +14,7 @@
 * limitations under the License.
 */
 package scalax.xml
-package parser
+package pull
 
 private sealed trait MarkupToken {
   val line: Int

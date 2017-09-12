@@ -4,6 +4,9 @@ val scala212 = "2.12.3"
 lazy val commonSettings = Seq(
   organization := "org.gnieh",
   scalaVersion := scala212,
+  libraryDependencies ++= Seq(
+    "org.scalatest" %% "scalatest" % "3.0.3" % Test,
+    "com.github.pathikrit" %% "better-files" % "2.17.1" % Test),
   version := "0.1.0-SNAPSHOT",
   description := "Scala XML library revisited",
   licenses += ("The Apache Software License, Version 2.0" -> url("http://www.apache.org/licenses/LICENSE-2.0.txt")),
@@ -13,7 +16,7 @@ lazy val commonSettings = Seq(
   fork in test := true,
   scalacOptions in (Compile,doc) ++= Seq("-groups", "-implicits"),
   autoAPIMappings := true,
-  scalacOptions ++= Seq("-deprecation", "-feature", "-unchecked")) ++ publishSettings
+  scalacOptions ++= Seq("-deprecation", "-feature", "-unchecked", "-Ypartial-unification")) ++ publishSettings
 
 lazy val publishSettings = Seq(
   publishMavenStyle := true,
@@ -56,13 +59,17 @@ lazy val xml = project.in(file("."))
   .settings(
     name := "xml",
     packagedArtifacts := Map())
-  .aggregate(core)
+  .aggregate(core, std)
 
 lazy val core = project.in(file("core"))
   .enablePlugins(ScoverageSbtPlugin)
   .settings(commonSettings)
   .settings(
-    name := "xml-core",
-    libraryDependencies ++= Seq(
-      "org.scalatest" %% "scalatest" % "3.0.3" % Test,
-      "com.github.pathikrit" %% "better-files" % "2.17.1" % Test))
+    name := "xml-core")
+
+lazy val std = project.in(file("std"))
+  .enablePlugins(ScoverageSbtPlugin)
+  .settings(commonSettings)
+  .settings(
+    name := "xml-std")
+  .dependsOn(core)

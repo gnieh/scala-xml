@@ -14,26 +14,30 @@
 * limitations under the License.
 */
 package scalax.xml
-package dom
+package tree
 
-sealed trait XmlNode
+final case class Tree[+A](node: A, children: Seq[Tree[A]]) {
 
-case class Document(
-    version: Option[String],
-    encoding: Option[String],
-    standalone: Option[Boolean],
-    root: Elem)
+  def isLeaf: Boolean =
+    children.isEmpty
 
-case class Elem(name: QName, attributes: Map[QName, String], children: Seq[XmlNode]) extends XmlNode
+  def map[B](f: A => B): Tree[B] =
+    Tree(f(node), children.map(_.map(f)))
 
-case class Comment(content: String) extends XmlNode
+  def fold[T](f: (A, Seq[T]) => T): T =
+    f(node, children.map(_.fold(f)))
 
-case class Text(content: String) extends XmlNode
+  def withNode[B >: A](n: B): Tree[B] =
+    copy(node = n)
 
-case class EntityRef(name: String) extends XmlNode
+  def withChildren[B >: A](chldn: Seq[Tree[B]]): Tree[B] =
+    copy(children = chldn)
 
-case class CharRef(vaue: Int) extends XmlNode
+}
 
-case class CDATA(content: String) extends XmlNode
+object Tree {
 
-case class PI(target: String, content: String) extends XmlNode
+  def apply[A](n: A): Tree[A] =
+    Tree(n, Nil)
+
+}

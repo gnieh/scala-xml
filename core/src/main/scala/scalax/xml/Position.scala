@@ -15,9 +15,12 @@
 */
 package scalax.xml
 
-case class XmlException(position: Position, error: XmlError, message: String) extends Exception {
+trait Position
 
-  override def getMessage: String =
-    f"$position: ${error.name} $message"
+object NoPosition extends Position {
+  override def toString = "<no position>"
+}
 
+class LineColumnPosition(line: Int, column: Int) extends Position {
+  override def toString = f"[$line.$column]"
 }

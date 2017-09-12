@@ -13,27 +13,7 @@
 * See the License for the specific language governing permissions and
 * limitations under the License.
 */
-package scalax
+package scalax.xml
+package pull
 
-import scala.io.Source
-
-import java.net.URI
-
-package object xml {
-
-  import parser._
-  import dom._
-
-  type Attributes = Seq[Attribute]
-
-  implicit class XmlInterpolators(val sc: StringContext) extends AnyVal {
-
-    def xml(args: Any*): XmlNode =
-      DOMParser.fromParts(sc.parts.map(Source.fromString(_)), args).parse()
-
-    def xmldoc(args: Any*): Document =
-      DOMParser.fromParts(sc.parts.map(Source.fromString(_)), args).parseDocument()
-
-  }
-
-}
+case class Attr(name: QName, value: Seq[XmlTexty])

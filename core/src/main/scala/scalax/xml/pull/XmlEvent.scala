@@ -14,7 +14,7 @@
 * limitations under the License.
 */
 package scalax.xml
-package parser
+package pull
 
 sealed trait XmlEvent {
   val line: Int
@@ -30,7 +30,7 @@ case object StartDocument extends XmlEvent {
 
 final case class XmlDecl(version: String, encoding: Option[String], standalone: Option[Boolean])(val line: Int, val column: Int) extends XmlEvent
 
-final case class StartTag(name: QName, attributes: Attributes, isEmpty: Boolean)(val line: Int, val column: Int) extends XmlEvent
+final case class StartTag(name: QName, attributes: Seq[Attr], isEmpty: Boolean)(val line: Int, val column: Int) extends XmlEvent
 
 final case class XmlCharRef(value: Int)(val line: Int, val column: Int) extends XmlTexty
 
@@ -46,8 +46,8 @@ final case class EndTag(name: QName)(val line: Int, val column: Int) extends Xml
 
 final case class EndDocument()(val line: Int, val column: Int) extends XmlEvent
 
-final case class ExpectAttributes(name: QName, attributes: Attributes)(val line: Int, val column: Int) extends XmlEvent
+final case class ExpectAttributes(name: QName, attributes: Seq[Attr])(val line: Int, val column: Int) extends XmlEvent
 
-final case class ExpectAttributeValue(tname: QName, attributes: Attributes, aname: QName)(val line: Int, val column: Int) extends XmlEvent
+final case class ExpectAttributeValue(tname: QName, attributes: Seq[Attr], aname: QName)(val line: Int, val column: Int) extends XmlEvent
 
 final case class ExpectNodes()(val line: Int, val column: Int) extends XmlEvent
