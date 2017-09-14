@@ -14,12 +14,26 @@
 * limitations under the License.
 */
 package scalax.xml
+package dtd
 
-object XmlUtils {
+sealed trait AttType
 
-  def isXmlWhitespace(c: Char): Boolean =
-    c == ' ' || c == '\t' || c == '\r' || c == '\n'
+case object CDATAType extends AttType
 
-  val valueDelimiters = " \t\r\n<&"
+case object IDType extends AttType
 
-}
+case object IDREFType extends AttType
+
+case object IDREFSType extends AttType
+
+case object ENTITYType extends AttType
+
+case object ENTITIESType extends AttType
+
+case object NMTOKENType extends AttType
+
+case object NMTOKENSType extends AttType
+
+final case class NOTATIONType(names: Seq[String]) extends AttType
+
+final case class ENUMType(tokens: Seq[String]) extends AttType

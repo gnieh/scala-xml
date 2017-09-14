@@ -14,12 +14,16 @@
 * limitations under the License.
 */
 package scalax.xml
+package dtd
 
-object XmlUtils {
-
-  def isXmlWhitespace(c: Char): Boolean =
-    c == ' ' || c == '\t' || c == '\r' || c == '\n'
-
-  val valueDelimiters = " \t\r\n<&"
-
+sealed trait Cp {
+  val modifier: Option[Modifier]
 }
+
+sealed trait Content extends Cp
+
+final case class Choice(choices: Seq[Cp], modifier: Option[Modifier]) extends Content
+
+final case class Sequence(seq: Seq[Cp], modifier: Option[Modifier]) extends Content
+
+final case class Name(name: QName, modifier: Option[Modifier]) extends Cp

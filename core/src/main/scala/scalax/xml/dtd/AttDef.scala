@@ -14,12 +14,6 @@
 * limitations under the License.
 */
 package scalax.xml
+package dtd
 
-object XmlUtils {
-
-  def isXmlWhitespace(c: Char): Boolean =
-    c == ' ' || c == '\t' || c == '\r' || c == '\n'
-
-  val valueDelimiters = " \t\r\n<&"
-
-}
+final case class AttDef(name: QName, tpe: AttType, default: AttDefault)

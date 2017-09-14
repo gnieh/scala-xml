@@ -19,4 +19,4 @@ sealed trait ExternalId
 
 final case class SYSTEM(system: String) extends ExternalId
 
-final case class PUBLIC(pubid: String, system: String) extends ExternalId
+final case class PUBLIC(pubid: String, system: Option[String]) extends ExternalId

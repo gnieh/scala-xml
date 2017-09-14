@@ -31,6 +31,6 @@ case class DeclToken(name: String, line: Int, column: Int) extends MarkupToken
 
 case class CommentToken(line: Int, column: Int) extends MarkupToken
 
-case class CDataToken(line: Int, column: Int) extends MarkupToken
+case class SectionToken(name: Either[String, String], line: Int, column: Int) extends MarkupToken
 
 case class EntityRefToken(name: String, line: Int, column: Int) extends MarkupToken

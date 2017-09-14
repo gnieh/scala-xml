@@ -14,12 +14,14 @@
 * limitations under the License.
 */
 package scalax.xml
+package dtd
 
-object XmlUtils {
+import parser._
 
-  def isXmlWhitespace(c: Char): Boolean =
-    c == ' ' || c == '\t' || c == '\r' || c == '\n'
+private sealed trait PEDef
 
-  val valueDelimiters = " \t\r\n<&"
+private case class EntityValue(value: Seq[XmlTexty]) extends PEDef
 
-}
+private case class ExternalPEDef(externalid: ExternalId) extends PEDef
+
+private case object PEBeingDefined extends PEDef

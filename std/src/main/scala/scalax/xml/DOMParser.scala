@@ -122,7 +122,7 @@ class DOMParser private (partial: Boolean, private var parts: Seq[Source], priva
           case _ =>
             throw new IllegalStateException
         }
-      case evt @ XmlEntitiyRef(n) =>
+      case evt @ XmlEntityRef(n) =>
         elements match {
           case builder :: _ =>
             builder += Tree(EntityRef(n))
@@ -213,7 +213,7 @@ class DOMParser private (partial: Boolean, private var parts: Seq[Source], priva
     case XmlString(s, false) => Tree(Text(s))
     case XmlString(s, true)  => Tree(CDATA(s))
     case XmlCharRef(n)       => Tree(CharRef(n))
-    case XmlEntitiyRef(n)    => Tree(EntityRef(n))
+    case XmlEntityRef(n)     => Tree(EntityRef(n))
   }
 
 }

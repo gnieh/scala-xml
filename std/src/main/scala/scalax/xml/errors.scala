@@ -15,6 +15,12 @@
 */
 package scalax.xml
 
+/** Represents a validation constraint as defined in the XML specification. */
+sealed abstract class VCError(name: String) extends XmlError(name)
+case object VCNoDuplicateTypes extends VCError("[VC: No Duplicate Types]")
+case object VCNotationDeclared extends VCError("[VC: Notation Declared]")
+case object VCEntityDeclared extends VCError("[VC: Entity Declared]")
+
 /** Represents a namespace constraint as defined in the XML namespaces recommendation. */
 sealed abstract class NSError(name: String) extends XmlError(name)
 case object NSCPrefixDeclared extends NSError("[NSC: Prefix Declared]")
@@ -26,3 +32,4 @@ sealed abstract class WFError(name: String) extends XmlError(name)
 case object WFCElementTypeMatch extends WFError("[WFC: Element Type Match]")
 case object WFCEntityDeclared extends WFError("[WFC: Entity Declared]")
 case object WFCNoRecursion extends WFError("[WFC: No Recursion]")
+case object WFCParsedEntity extends WFError("[WFC: Parsed Entity]")

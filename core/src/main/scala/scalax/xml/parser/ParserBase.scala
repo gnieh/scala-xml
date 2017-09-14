@@ -18,7 +18,10 @@ package parser
 
 import scala.io.Source
 
-import scala.collection.immutable.Queue
+import scala.collection.immutable.{
+  Queue,
+  VectorBuilder
+}
 
 import scala.annotation.{
   tailrec,
@@ -151,6 +154,107 @@ abstract class ParserBase(private var inputs: Queue[Source], protected var is11:
     loop(false)
   }
 
+  protected def space1(prod: String, msg: String): Unit = {
+    assert(isXmlWhitespace(_), prod, msg)
+    space()
+  }
+
+  protected def isNCNameStart(c: Char): Boolean = {
+    import java.lang.Character._
+
+    getType(c).toByte match {
+      case LOWERCASE_LETTER |
+        UPPERCASE_LETTER | OTHER_LETTER |
+        TITLECASE_LETTER | LETTER_NUMBER => true
+      case _ => c == '_'
+    }
+  }
+
+  protected def isNCNameChar(c: Char): Boolean = {
+    import java.lang.Character._
+    // The constants represent groups Mc, Me, Mn, Lm, and Nd.
+
+    isNCNameStart(c) || (getType(c).toByte match {
+      case COMBINING_SPACING_MARK |
+        ENCLOSING_MARK | NON_SPACING_MARK |
+        MODIFIER_LETTER | DECIMAL_DIGIT_NUMBER => true
+      case _ => ".-·".contains(c)
+    })
+  }
+
+  protected def readNCName(): String = {
+    val c = nextChar()
+    if (isNCNameStart(c)) {
+      val sb = new StringBuilder
+      untilChar(c => !isNCNameChar(c), sb.append(c))
+      sb.toString
+    } else {
+      fail("5", f"character '$c' cannot start a NCName")
+    }
+  }
+
+  protected def readQName(): QName = {
+    val part1 = readNCName()
+    peekChar() match {
+      case Some(':') =>
+        nextChar()
+        val part2 = readNCName()
+        QName(Some(part1), part2, None)
+      case _ =>
+        QName(None, part1, None)
+    }
+  }
+
+  /** Reads the nextChar markup token */
+  protected def readMarkupToken(): MarkupToken = {
+    accept('<', "43", "expected token start")
+    val l = line
+    val c = column
+    peekChar() match {
+      case Some('/') =>
+        nextChar()
+        val qname = readQName()
+        space()
+        accept('>', "42", "missing '>' at the end of closing tag")
+        EndToken(qname, l, c)
+      case Some('?') =>
+        nextChar()
+        PIToken(readNCName(), l, c)
+      case Some('!') =>
+        nextChar()
+        peekChar() match {
+          case Some('-') =>
+            nextChar()
+            skipComment(l, c)
+          case Some('[') =>
+            nextChar()
+            readSection(l, c)
+          case _ =>
+            DeclToken(readNCName(), l, c)
+        }
+      case _ =>
+        StartToken(readQName(), l, c)
+    }
+  }
+
+  /** We have read '<![' so far */
+  private def readSection(l: Int, c: Int): SectionToken = {
+    space()
+    val n =
+      peekChar() match {
+        case Some('%') =>
+          nextChar();
+          val n = readNCName()
+          accept(';', "69", "expected ';' at the end of a parameter entity reference")
+          Right(n)
+        case _ =>
+          Left(readNCName())
+      }
+    space()
+    accept('[', "19", "'[' expected")
+    SectionToken(n, l, c)
+  }
+
   /** We have read '<!-' so far */
   protected def skipComment(l: Int, c: Int): CommentToken = {
     accept('-', "15", "second dash missing to open comment")
@@ -167,6 +271,184 @@ abstract class ParserBase(private var inputs: Queue[Source], protected var is11:
     }
     loop()
     CommentToken(l, c)
+  }
+
+  /** We have just read the PI target */
+  protected def readPIBody(): String = {
+    space()
+    @tailrec
+    def loop(sb: StringBuilder): String = {
+      val sb1 = untilChar(c => c == '?', sb)
+      // read potential ?
+      nextCharOpt()
+      peekChar() match {
+        case Some('>') =>
+          nextChar()
+          sb.toString
+        case Some(_) =>
+          loop(sb.append('?'))
+        case None =>
+          fail("16", "unexpected end of input")
+      }
+    }
+    loop(new StringBuilder)
+  }
+
+  @tailrec
+  final protected def readAttributeValue(delim: Option[Char], current: StringBuilder, builder: VectorBuilder[XmlTexty], l: Int, c: Int): Seq[XmlTexty] = {
+    val delimiters = delim.fold(valueDelimiters)(valueDelimiters + _)
+    untilChar(delimiters.contains(_), current)
+    nextCharOpt() match {
+      case `delim` =>
+        if (!current.isEmpty)
+          builder += XmlString(current.toString, false)(l, c)
+        builder.result()
+      case None => fail("10", "unexpected end of input")
+      case Some('\r') =>
+        peekChar() match {
+          case Some('\n') =>
+            readAttributeValue(delim, current.append(nextChar()), builder, l, c)
+          case _ =>
+            readAttributeValue(delim, current.append(' '), builder, l, c)
+        }
+      case Some(c) if isXmlWhitespace(c) =>
+        readAttributeValue(delim, current.append(' '), builder, l, c)
+      case Some('&') =>
+        val l = line
+        val c = column
+        builder += XmlString(current.toString, false)(l, c)
+        peekChar() match {
+          case Some('#') =>
+            nextChar()
+            val n = readCharRef()
+            builder += XmlCharRef(n)(l, c)
+            readAttributeValue(delim, new StringBuilder, builder, line, column)
+          case _ =>
+            val s = readNamedEntity()
+            builder += XmlEntityRef(s)(l, c)
+            readAttributeValue(delim, new StringBuilder, builder, line, column)
+        }
+      case Some(c) =>
+        fail("10", f"unexpected character '$c'")
+    }
+  }
+
+  protected def readNamedEntity(): String = {
+    val name = readNCName()
+    accept(';', "68", "named entity must end with a semicolon")
+    name
+  }
+
+  /** We read '&#' so far */
+  protected def readCharRef(): Int = {
+    def postlude(n: Int) =
+      (nextChar(): @switch) match {
+        case ';' =>
+          if (isValid(n))
+            n
+          else
+            fail("2", "invalid character")
+        case _ =>
+          fail("66", "character reference must end with a semicolon")
+      }
+    peekChar() match {
+      case Some('x') =>
+        nextChar()
+        val n = readNum(16)
+        postlude(n)
+      case _ =>
+        val n = readNum(10)
+        postlude(n)
+    }
+  }
+
+  private def readNum(base: Int): Int = {
+    object Digit {
+      def unapply(c: Option[Char]): Option[Int] =
+        c match {
+          case Some(c) =>
+            if ((base == 10 || base == 16) && '0' <= c && c <= '9')
+              Some(c - '0')
+            else if (base == 16 && 'a' <= c && c <= 'f')
+              Some(c - 'a' + 10)
+            else if (base == 16 && 'A' <= c && c <= 'F')
+              Some(c - 'A' + 10)
+            else
+              None
+          case None =>
+            None
+        }
+    }
+
+    @tailrec
+    def rest(acc: Int): Int =
+      peekChar() match {
+        case Digit(d) =>
+          nextChar()
+          rest(acc * base + d)
+        case _ =>
+          acc
+      }
+
+    nextCharOpt() match {
+      case Digit(d) => rest(d)
+      case _        => fail("66", "bad first character reference digit")
+    }
+  }
+
+  protected def readExternalID(s: Boolean, optionalPublicSystem: Boolean): Option[ExternalId] = {
+    peekChar() match {
+      case Some(c) if isNCNameStart(c) =>
+        if (s) {
+          val sysOrPub = readNCName()
+          space1("75", "space required after SYSTEM or PUBLIC")
+          sysOrPub match {
+            case "SYSTEM" =>
+              Some(SYSTEM(readQuoted(false, "11")))
+            case "PUBLIC" =>
+              val pubid = readQuoted(true, "12")
+              if (optionalPublicSystem) {
+                val s = space()
+                peekChar() match {
+                  case Some(delimiter @ ('"' | '\'')) =>
+                    if (s) {
+                      Some(PUBLIC(pubid, Some(readQuoted(false, "12"))))
+                    } else {
+                      fail("75", "space required after PubidLiteral")
+                    }
+                  case _ =>
+                    Some(PUBLIC(pubid, None))
+                }
+              } else {
+                space1("75", "space required after PubidLiteral")
+                Some(PUBLIC(pubid, Some(readQuoted(false, "12"))))
+              }
+            case _ =>
+              fail("75", "SYSTEM or PUBLIC expected")
+          }
+        } else {
+          fail("28", "space required befor ExternalId")
+        }
+      case _ =>
+        None
+    }
+  }
+
+  private def readQuoted(pub: Boolean, error: String): String = {
+    space()
+    val delimiter = assert(c => c == '"' || c == '\'', error, "single or double quote expected")
+    val pred: Char => Boolean =
+      if (pub)
+        if (delimiter == '\'')
+          c => !(c == 0x20 || c == 0xd || c == 0xa || ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z') || ('0' <= c && c <= '9') || "-'()+,./:=?;!*#@$_%".contains(c))
+        else
+          c => !(c == 0x20 || c == 0xd || c == 0xa || ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z') || ('0' <= c && c <= '9') || "-()+,./:=?;!*#@$_%".contains(c))
+      else
+        c => c == delimiter
+
+    val s = untilChar(pred, new StringBuilder).toString
+    nextChar()
+    s
   }
 
 }

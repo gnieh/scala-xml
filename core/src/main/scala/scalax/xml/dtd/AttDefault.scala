@@ -14,12 +14,14 @@
 * limitations under the License.
 */
 package scalax.xml
+package dtd
 
-object XmlUtils {
+import parser._
 
-  def isXmlWhitespace(c: Char): Boolean =
-    c == ' ' || c == '\t' || c == '\r' || c == '\n'
+sealed trait AttDefault
 
-  val valueDelimiters = " \t\r\n<&"
+case object REQUIRED extends AttDefault
 
-}
+case object IMPLIED extends AttDefault
+
+final case class FIXED(value: Seq[XmlTexty]) extends AttDefault

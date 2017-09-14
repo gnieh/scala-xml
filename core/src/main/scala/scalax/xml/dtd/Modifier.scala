@@ -14,12 +14,12 @@
 * limitations under the License.
 */
 package scalax.xml
+package dtd
 
-object XmlUtils {
+sealed trait Modifier
 
-  def isXmlWhitespace(c: Char): Boolean =
-    c == ' ' || c == '\t' || c == '\r' || c == '\n'
+case object Optional extends Modifier
 
-  val valueDelimiters = " \t\r\n<&"
+case object Star extends Modifier
 
-}
+case object Plus extends Modifier

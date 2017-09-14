@@ -14,12 +14,14 @@
 * limitations under the License.
 */
 package scalax.xml
+package dtd
 
-object XmlUtils {
+sealed trait Kind
 
-  def isXmlWhitespace(c: Char): Boolean =
-    c == ' ' || c == '\t' || c == '\r' || c == '\n'
+case object EMPTY extends Kind
 
-  val valueDelimiters = " \t\r\n<&"
+case object ANY extends Kind
 
-}
+final case class Children(content: Content) extends Kind
+
+final case class Mixed(names: Seq[QName]) extends Kind
